@@ -142,6 +142,15 @@ static void ev_handler(struct mg_connection *c, int ev, void *ev_data) {
             return;
         }
 
+        /* HEAD — health probe do Render (e qualquer outro cliente) */
+        if (mg_vcasecmp(&hm->method, "HEAD") == 0) {
+            mg_http_reply(c, 200,
+                "Access-Control-Allow-Origin: *\r\n"
+                "Content-Type: application/json\r\n",
+                "");
+            return;
+        }
+
         /* Log de cada request */
         char uri_log[256] = {0};
         size_t loglen = hm->uri.len < 255 ? hm->uri.len : 255;
