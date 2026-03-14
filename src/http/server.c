@@ -80,6 +80,28 @@ bool mg_http_match_uri(const struct mg_http_message *hm, const char *glob) {
     return mg_match(hm->uri, mg_str(glob), NULL);
 }
 
+/* Matcher próprio: não depende do mg_match do Mongoose.
+   '*' casa qualquer segmento sem '/'.
+   Ignora trailing slash na URI. */
+static bool dp_match_uri(const char *uri, size_t uri_len, const char *pattern) {
+    size_t pi = 0, ui = 0;
+    size_t plen = strlen(pattern);
+    while (pi < plen && ui < uri_len) {
+        if (pattern[pi] == '*') {
+            /* avança um segmento da URI (para em '/' ou fim) */
+            while (ui < uri_len && uri[ui] != '/') ui++;
+            pi++;
+        } else if (pattern[pi] == uri[ui]) {
+            pi++; ui++;
+        } else {
+            return false;
+        }
+    }
+    /* ignora trailing slash na URI */
+    if (ui < uri_len && uri[ui] == '/') ui++;
+    return pi == plen && ui == uri_len;
+}
+
 /* ── legacy send_api_response (mantido para compat) ─────── */
 
 void send_api_response(struct mg_connection *c, int status, ApiResponse *res) {
@@ -120,24 +142,33 @@ static void ev_handler(struct mg_connection *c, int ev, void *ev_data) {
             return;
         }
 
-        /* Log de cada request para diagnóstico */
-        printf("[HTTP] %.*s %.*s\n",
+        /* Log de cada request */
+        char uri_log[256] = {0};
+        size_t loglen = hm->uri.len < 255 ? hm->uri.len : 255;
+        memcpy(uri_log, hm->uri.buf, loglen);
+        printf("[HTTP] %.*s %s (uri_len=%d, routes=%d)\n",
             (int)hm->method.len, hm->method.buf,
-            (int)hm->uri.len,    hm->uri.buf);
+            uri_log, (int)hm->uri.len, data->num_routes);
         fflush(stdout);
 
         bool found = false;
         for (int i = 0; i < data->num_routes; i++) {
-            if (mg_vcasecmp(&hm->method, data->routes[i].method) == 0 &&
-                mg_http_match_uri(hm, data->routes[i].path_pattern)) {
-                data->routes[i].handler(c, hm, data->db);
-                found = true;
-                break;
-            }
+            /* Comparação de método: sem usar mg_vcasecmp para eliminar variáveis */
+            size_t mlen = strlen(data->routes[i].method);
+            if (mlen != hm->method.len) continue;
+            if (strncasecmp(data->routes[i].method, hm->method.buf, mlen) != 0) continue;
+            /* Comparação de URI com matcher próprio */
+            if (!dp_match_uri(hm->uri.buf, hm->uri.len, data->routes[i].path_pattern)) continue;
+            data->routes[i].handler(c, hm, data->db);
+            found = true;
+            break;
         }
 
         if (!found) {
-            send_error_json(c, 404, "NOT_FOUND", "Recurso não encontrado.");
+            printf("[404] no route for %.*s %s\n",
+                (int)hm->method.len, hm->method.buf, uri_log);
+            fflush(stdout);
+            send_error_json(c, 404, "NOT_FOUND", "Recurso nao encontrado.");
         }
     }
 }
@@ -158,7 +189,8 @@ void start_http_server(const char *addr, Route *routes, int num_routes, dp_db_t 
         return;
     }
 
-    dp_log_info("DistribPro Backend listening on %s", addr);
+    printf("[STARTUP] Listening on %s with %d routes\n", addr, num_routes);
+    fflush(stdout);
     for (;;) mg_mgr_poll(&mgr, 1000);
     mg_mgr_free(&mgr);
     free(data);
