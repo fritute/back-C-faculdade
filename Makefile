@@ -1,7 +1,17 @@
 CC = gcc
-PG_PATH = C:/msys64/ucrt64
-CFLAGS = -Iinclude -Ilibs -I"$(PG_PATH)/include" -Wall
-LIBS = -lws2_32 -L"$(PG_PATH)/lib" -lpq
+
+# No Linux (Render) não há MSYS2 — libpq vem do sistema (apt install libpq-dev)
+# No Windows local, ajuste PG_PATH para seu MSYS2
+ifeq ($(OS),Windows_NT)
+    PG_PATH    = C:/msys64/ucrt64
+    CFLAGS     = -Iinclude -Ilibs -I"$(PG_PATH)/include" -Wall
+    LIBS       = -lws2_32 -L"$(PG_PATH)/lib" -lpq
+    TARGET     = $(BIN_DIR)/distribpro.exe
+else
+    CFLAGS     = -Iinclude -Ilibs -Wall
+    LIBS       = -lpq
+    TARGET     = $(BIN_DIR)/distribpro
+endif
 
 SRC_DIR = src
 LIB_DIR = libs
@@ -23,16 +33,14 @@ SOURCES = $(SRC_DIR)/main.c \
           $(LIB_DIR)/mongoose.c \
           $(LIB_DIR)/cJSON.c
 
-TARGET = $(BIN_DIR)/distribpro.exe
-
 all: $(TARGET)
 
 $(TARGET): $(SOURCES)
-	@if not exist bin mkdir bin
+	mkdir -p $(BIN_DIR)
 	$(CC) $(SOURCES) $(CFLAGS) $(LIBS) -o $(TARGET)
 
 clean:
-	@if exist bin rmdir /s /q bin
+	rm -rf $(BIN_DIR)
 
 run: all
 	./$(TARGET)

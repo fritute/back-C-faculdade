@@ -1,6 +1,8 @@
 #include "distribpro/http.h"
 #include "distribpro/common.h"
 #include "distribpro/db.h"
+#include <stdlib.h>
+#include <stdio.h>
 
 /* ── Produtos ── */
 void handle_get_produtos(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
@@ -50,7 +52,13 @@ void handle_put_config(struct mg_connection *c, struct mg_http_message *hm, dp_d
 int main(void) {
     dp_log_info("Starting DistribPro Professional Backend...");
 
-    const char *conn_str = "host=db.mfftiyyfyojecxhiodro.supabase.co port=6543 dbname=postgres user=postgres password=987046715Gustavo sslmode=require";
+    /* Lê a string de conexão da variável de ambiente DATABASE_URL.
+       Se não estiver definida, usa o fallback local para desenvolvimento. */
+    const char *conn_str = getenv("DATABASE_URL");
+    if (!conn_str || conn_str[0] == '\0') {
+        conn_str = "host=db.mfftiyyfyojecxhiodro.supabase.co port=6543 dbname=postgres user=postgres password=987046715Gustavo sslmode=require";
+    }
+
     dp_db_t db = db_init(conn_str);
     if (!db) { dp_log_error("Failed to connect to database. Exiting."); return 1; }
     dp_log_info("Database connection established.");
@@ -104,7 +112,13 @@ int main(void) {
         {"PUT",    "/api/v1/config",                   handle_put_config},
     };
 
-    start_http_server("http://0.0.0.0:8000", routes, sizeof(routes) / sizeof(routes[0]), db);
+    /* Lê a porta da variável PORT (injetada pelo Render) ou usa 8000 como padrão */
+    const char *port_env = getenv("PORT");
+    char listen_addr[32];
+    snprintf(listen_addr, sizeof(listen_addr), "http://0.0.0.0:%s", port_env ? port_env : "8000");
+    dp_log_info(listen_addr);
+
+    start_http_server(listen_addr, routes, sizeof(routes) / sizeof(routes[0]), db);
     db_close(db);
     return 0;
 }
