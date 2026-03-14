@@ -64,7 +64,7 @@ int main(void) {
     dp_log_info("Database connection established.");
 
     Route routes[] = {
-        /* estoque-baixo ANTES de /produtos/* */
+        /* estoque-baixo ANTES de produtos wildcard */
         {"GET",    "/api/v1/produtos/estoque-baixo",   handle_get_estoque_baixo},
         /* Produtos */
         {"GET",    "/api/v1/produtos",                 handle_get_produtos},
@@ -85,7 +85,7 @@ int main(void) {
         {"GET",    "/api/v1/fornecedores/*",           handle_get_fornecedor_by_id},
         {"PUT",    "/api/v1/fornecedores/*",           handle_put_fornecedor},
         {"DELETE", "/api/v1/fornecedores/*",           handle_delete_fornecedor},
-        /* recentes ANTES de /pedidos/* */
+        /* recentes ANTES de pedidos wildcard */
         {"GET",    "/api/v1/pedidos/recentes",         handle_get_pedidos_recentes},
         /* Pedidos */
         {"GET",    "/api/v1/pedidos",                  handle_get_pedidos},

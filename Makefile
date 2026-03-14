@@ -8,7 +8,7 @@ ifeq ($(OS),Windows_NT)
     LIBS       = -lws2_32 -L"$(PG_PATH)/lib" -lpq
     TARGET     = $(BIN_DIR)/distribpro.exe
 else
-    CFLAGS     = -Iinclude -Ilibs -Wall
+    CFLAGS     = -Iinclude -Ilibs -I$(shell pg_config --includedir) -Wall
     LIBS       = -lpq
     TARGET     = $(BIN_DIR)/distribpro
 endif
