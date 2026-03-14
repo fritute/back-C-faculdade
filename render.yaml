@@ -1,9 +1,7 @@
 services:
   - type: web
     name: distribpro-backend
-    env: native
-    buildCommand: apt-get install -y libpq-dev && make
-    startCommand: ./bin/distribpro
+    env: docker
     envVars:
       - key: DATABASE_URL
-        sync: false   # valor definido manualmente no painel do Render (não commitar a senha)
+        sync: false   # defina o valor manualmente no painel do Render (não commitar a senha)
