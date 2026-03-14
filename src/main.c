@@ -55,8 +55,13 @@ int main(void) {
     /* Lê a string de conexão da variável de ambiente DATABASE_URL.
        Se não estiver definida, usa o fallback local para desenvolvimento. */
     const char *conn_str = getenv("DATABASE_URL");
+    static char conn_buf[1024];
     if (!conn_str || conn_str[0] == '\0') {
         conn_str = "host=db.mfftiyyfyojecxhiodro.supabase.co port=6543 dbname=postgres user=postgres password=987046715Gustavo sslmode=require";
+    } else if (strstr(conn_str, "postgresql://") && !strstr(conn_str, "sslmode=")) {
+        /* Garante sslmode=require para Supabase em formato URI */
+        snprintf(conn_buf, sizeof(conn_buf), "%s?sslmode=require", conn_str);
+        conn_str = conn_buf;
     }
 
     dp_db_t db = db_init(conn_str);
@@ -64,6 +69,9 @@ int main(void) {
     dp_log_info("Database connection established.");
 
     Route routes[] = {
+        /* Health check para o Render */
+        {"GET",    "/",                                 handle_get_clientes}, /* reusa handler inofensivo */
+        {"GET",    "/health",                          handle_get_clientes},
         /* estoque-baixo ANTES de produtos wildcard */
         {"GET",    "/api/v1/produtos/estoque-baixo",   handle_get_estoque_baixo},
         /* Produtos */

@@ -120,6 +120,12 @@ static void ev_handler(struct mg_connection *c, int ev, void *ev_data) {
             return;
         }
 
+        /* Log de cada request para diagnóstico */
+        printf("[HTTP] %.*s %.*s\n",
+            (int)hm->method.len, hm->method.buf,
+            (int)hm->uri.len,    hm->uri.buf);
+        fflush(stdout);
+
         bool found = false;
         for (int i = 0; i < data->num_routes; i++) {
             if (mg_vcasecmp(&hm->method, data->routes[i].method) == 0 &&
