@@ -427,5 +427,4 @@ O servidor iniciará em `http://localhost:8000`.
 
 - `GET /api/v1/produtos`: Retorna uma lista de exemplo (Mock).
 - Outros endpoints estão com stubs e prontos para implementação da lógica de banco de dados.
-#   b a c k - C - f a c u l d a d e  
- 
+#
