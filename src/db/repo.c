@@ -485,7 +485,6 @@ static DbResult pg_save_pedido(dp_db_t db, const char *body) {
     const char *data=cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
     const char *status_v=cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
     const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
-    cJSON_Delete(j);
     /* Transação: inserir pedido + decrementar estoque */
     PQexec(conn,"BEGIN");
     const char *p[]={cid_s,pid_s,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
@@ -494,6 +493,9 @@ static DbResult pg_save_pedido(dp_db_t db, const char *body) {
         " VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
         " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
         8,NULL,p,NULL,NULL,0);
+
+    cJSON_Delete(j);
+
     if (PQresultStatus(r) != PGRES_TUPLES_OK) { PQexec(conn,"ROLLBACK"); return db_err(conn,r); }
     /* Decrementar estoque apenas se não for Cancelado */
     if (!status_v || strcmp(status_v,"Cancelado")!=0) {
@@ -518,12 +520,14 @@ static DbResult pg_update_pedido(dp_db_t db, int id, const char *body) {
     char qtd_s[16]="0",valor_s[32]="0";
     cJSON *qtd=cJSON_GetObjectItem(j,"qtd"); if(qtd) snprintf(qtd_s,sizeof(qtd_s),"%d",(int)qtd->valuedouble);
     cJSON *val=cJSON_GetObjectItem(j,"valor"); if(val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
-    cJSON_Delete(j);
     const char *p[]={sid,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
     PGresult *r = PQexecParams(conn,
         "UPDATE pedidos SET qtd=$2,valor=$3,destino=$4,data_entrega=$5,status=$6,obs=$7,atualizado_em=NOW() WHERE id=$1"
         " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
         7,NULL,p,NULL,NULL,0);
+
+    cJSON_Delete(j);
+
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -738,13 +742,15 @@ static DbResult pg_update_config(dp_db_t db, const char *body) {
     const char *email   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
     const char *tel     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tel"));
     const char *endereco= cJSON_GetStringValue(cJSON_GetObjectItem(j,"endereco"));
-    cJSON_Delete(j);
     const char *p[]={razao,cnpj,email,tel,endereco};
     PGresult *r = PQexecParams(conn,
         "INSERT INTO config_empresa(razao_social,cnpj,email,tel,endereco) VALUES($1,$2,$3,$4,$5)"
         " ON CONFLICT (id) DO UPDATE SET razao_social=$1,cnpj=$2,email=$3,tel=$4,endereco=$5,atualizado_em=NOW()"
         " RETURNING id,razao_social,cnpj,email,tel,endereco,atualizado_em",
         5,NULL,p,NULL,NULL,0);
+
+    cJSON_Delete(j);
+
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
