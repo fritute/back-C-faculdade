@@ -544,62 +544,25 @@ static DbResult pg_save_pedido(dp_db_t db, const char *body) {
     const char *data=cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
     const char *status_v=cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
     const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
-
+    /* Transação: inserir pedido + decrementar estoque */
     PQexec(conn,"BEGIN");
 
     const char *ph[]={cid_s,"0",destino,data,status_v?status_v:"Pendente",obs};
     PGresult *r = PQexecParams(conn,
-        "INSERT INTO pedidos(cliente_id,valor,destino,data_entrega,status,obs)"
-        " VALUES($1,$2::numeric,$3,$4,$5,$6)"
-        " RETURNING id,cliente_id,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
-        6,NULL,ph,NULL,NULL,0);
-    if (PQresultStatus(r) != PGRES_TUPLES_OK) { PQexec(conn,"ROLLBACK"); cJSON_Delete(j); return db_err(conn,r); }
-    const char *pedido_id = PQgetvalue(r, 0, 0);
-    char ped_id_s[16]; snprintf(ped_id_s, sizeof(ped_id_s), "%s", pedido_id);
-    PQclear(r);
+        "INSERT INTO pedidos(cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs)"
+        " VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
+        " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
+        8,NULL,p,NULL,NULL,0);
 
-    double valor_total = 0;
-    int n = cJSON_GetArraySize(itens);
-    for (int i = 0; i < n; i++) {
-        cJSON *item = cJSON_GetArrayItem(itens, i);
-        cJSON *pid = cJSON_GetObjectItem(item,"produtoId"); if(!pid) pid = cJSON_GetObjectItem(item,"produto_id");
-        cJSON *qtd = cJSON_GetObjectItem(item,"qtd");
-        if (!pid||!qtd) { PQexec(conn,"ROLLBACK"); cJSON_Delete(j); DbResult er={NULL,strdup("Cada item precisa de produtoId e qtd.")}; return er; }
+    cJSON_Delete(j);
 
-        char pid_s[16], qtd_s[16];
-        snprintf(pid_s,sizeof(pid_s),"%d",(int)pid->valuedouble);
-        snprintf(qtd_s,sizeof(qtd_s),"%d",(int)qtd->valuedouble);
-
-        /* Buscar preco do produto */
-        const char *pp[]={pid_s};
-        PGresult *pr = PQexecParams(conn,"SELECT preco FROM produtos WHERE id=$1",1,NULL,pp,NULL,NULL,0);
-        if (PQresultStatus(pr)!=PGRES_TUPLES_OK || PQntuples(pr)==0) {
-            PQclear(pr); PQexec(conn,"ROLLBACK"); cJSON_Delete(j);
-            DbResult er={NULL,strdup("Produto nao encontrado.")}; return er;
-        }
-        double preco = atof(PQgetvalue(pr,0,0));
-        PQclear(pr);
-        double subtotal = preco * (int)qtd->valuedouble;
-        valor_total += subtotal;
-
-        char preco_s[32], sub_s[32];
-        snprintf(preco_s,sizeof(preco_s),"%.2f",preco);
-        snprintf(sub_s,sizeof(sub_s),"%.2f",subtotal);
-
-        const char *ip[]={ped_id_s,pid_s,qtd_s,preco_s,sub_s};
-        PGresult *ir = PQexecParams(conn,
-            "INSERT INTO itens_pedido(pedido_id,produto_id,qtd,preco_unit,subtotal)"
-            " VALUES($1,$2,$3,$4::numeric,$5::numeric)",
-            5,NULL,ip,NULL,NULL,0);
-        if (PQresultStatus(ir)!=PGRES_COMMAND_OK) { PQclear(ir); PQexec(conn,"ROLLBACK"); cJSON_Delete(j); DbResult er={NULL,strdup("Falha ao inserir item.")}; return er; }
-        PQclear(ir);
-
-        if (!status_v || strcmp(status_v,"Cancelado")!=0) {
-            const char *ep[]={qtd_s,pid_s};
-            PGresult *eu = PQexecParams(conn,"UPDATE produtos SET estoque=estoque-$1::int WHERE id=$2",2,NULL,ep,NULL,NULL,0);
-            if (PQresultStatus(eu)!=PGRES_COMMAND_OK) { PQclear(eu); PQexec(conn,"ROLLBACK"); cJSON_Delete(j); DbResult er={NULL,strdup("Falha ao atualizar estoque.")}; return er; }
-            PQclear(eu);
-        }
+    if (PQresultStatus(r) != PGRES_TUPLES_OK) { PQexec(conn,"ROLLBACK"); return db_err(conn,r); }
+    /* Decrementar estoque apenas se não for Cancelado */
+    if (!status_v || strcmp(status_v,"Cancelado")!=0) {
+        const char *ep[]={qtd_s,pid_s};
+        PGresult *eu = PQexecParams(conn,"UPDATE produtos SET estoque=estoque-$1::int WHERE id=$2",2,NULL,ep,NULL,NULL,0);
+        if (PQresultStatus(eu) != PGRES_COMMAND_OK) { PQclear(eu); PQclear(r); PQexec(conn,"ROLLBACK"); PGresult *tmp=PQexec(conn,"ROLLBACK"); PQclear(tmp); DbResult er={NULL,strdup("Falha ao atualizar estoque.")}; return er; }
+        PQclear(eu);
     }
     cJSON_Delete(j);
 
@@ -626,12 +589,14 @@ static DbResult pg_update_pedido(dp_db_t db, int id, const char *body) {
     const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
     char valor_s[32]="0";
     cJSON *val=cJSON_GetObjectItem(j,"valor"); if(val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
-    cJSON_Delete(j);
-    const char *p[]={sid,valor_s,destino,data,status_v?status_v:"Pendente",obs};
+    const char *p[]={sid,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
     PGresult *r = PQexecParams(conn,
-        "UPDATE pedidos SET valor=$2::numeric,destino=$3,data_entrega=$4,status=$5,obs=$6,atualizado_em=NOW() WHERE id=$1"
-        " RETURNING id,cliente_id,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
-        6,NULL,p,NULL,NULL,0);
+        "UPDATE pedidos SET qtd=$2,valor=$3,destino=$4,data_entrega=$5,status=$6,obs=$7,atualizado_em=NOW() WHERE id=$1"
+        " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
+        7,NULL,p,NULL,NULL,0);
+
+    cJSON_Delete(j);
+
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_pedido_com_itens(conn, r);
 }
@@ -1008,13 +973,15 @@ static DbResult pg_update_config(dp_db_t db, const char *body) {
     const char *email   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
     const char *tel     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tel"));
     const char *endereco= cJSON_GetStringValue(cJSON_GetObjectItem(j,"endereco"));
-    cJSON_Delete(j);
     const char *p[]={razao,cnpj,email,tel,endereco};
     PGresult *r = PQexecParams(conn,
         "INSERT INTO config_empresa(razao_social,cnpj,email,tel,endereco) VALUES($1,$2,$3,$4,$5)"
         " ON CONFLICT (id) DO UPDATE SET razao_social=$1,cnpj=$2,email=$3,tel=$4,endereco=$5,atualizado_em=NOW()"
         " RETURNING id,razao_social,cnpj,email,tel,endereco,atualizado_em",
         5,NULL,p,NULL,NULL,0);
+
+    cJSON_Delete(j);
+
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
