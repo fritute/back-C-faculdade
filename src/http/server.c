@@ -30,24 +30,49 @@ void send_error_json(struct mg_connection *c, int status, const char *code, cons
 }
 
 int extract_id_from_uri(struct mg_http_message *hm) {
-    const char *p = hm->uri.buf + hm->uri.len;
+    const char *end = hm->uri.buf + hm->uri.len;
+    /* Skip trailing slashes */
+    while (end > hm->uri.buf && *(end - 1) == '/') end--;
+    
+    const char *p = end;
     while (p > hm->uri.buf && *(p - 1) != '/') p--;
-    return atoi(p);
+    
+    char buf[32] = {0};
+    int len = (int)(end - p);
+    if (len > 0 && len < 31) {
+        memcpy(buf, p, len);
+        return atoi(buf);
+    }
+    return 0;
 }
 
 /* Para URIs como /api/v1/pedidos/5/status — retorna 5 */
 int extract_segment_before_last(struct mg_http_message *hm) {
     const char *end = hm->uri.buf + hm->uri.len;
-    const char *p = end - 1;
-    while (p > hm->uri.buf && *p != '/') p--;   /* skip last segment */
-    p--;                                          /* skip the '/' */
-    const char *q = p;
-    while (q > hm->uri.buf && *(q - 1) != '/') q--;
+    /* Skip trailing slashes */
+    while (end > hm->uri.buf && *(end - 1) == '/') end--;
+    
+    const char *p = end;
+    /* Skip last segment (e.g. status) */
+    while (p > hm->uri.buf && *(p - 1) != '/') p--;
+    
+    if (p <= hm->uri.buf) return 0;
+    
+    /* Skip the '/' before last segment */
+    p--;
+    const char *end2 = p;
+    while (end2 > hm->uri.buf && *(end2 - 1) == '/') end2--; /* should not happen, but safe */
+    
+    p = end2;
+    while (p > hm->uri.buf && *(p - 1) != '/') p--;
+    
     char buf[32] = {0};
-    int len = (int)(p - q + 1);
-    if (len < 1 || len > 31) return -1;
-    strncpy(buf, q, (size_t)len);
-    return atoi(buf);
+    int len = (int)(end2 - p);
+    if (len > 0 && len < 31) {
+        memcpy(buf, p, len);
+        return atoi(buf);
+    }
+    return 0;
 }
 
 char *body_to_str(struct mg_http_message *hm) {

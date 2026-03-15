@@ -77,6 +77,39 @@ static DbResult db_err(PGconn *conn, PGresult *res) {
 #define PG_CONN  PGconn *conn = (PGconn*)db_get_pg_conn(db); \
                  if (!conn) { DbResult r={NULL,strdup("Conex\u00e3o DB indispon\u00edvel.")}; return r; }
 
+/* Escapa e executa uma query com até 8 valores literais.
+   Usa PQexec (protocolo simples) para compatibilidade com PgBouncer. */
+static PGresult *pg_exec_lit(PGconn *conn, const char *fmt, const char * const vals[], int nvals) {
+    /* Escapa cada valor e substitui ? na query em ordem */
+    char *escaped[16] = {0};
+    for (int i = 0; i < nvals && i < 16; i++) {
+        if (vals[i] == NULL) {
+            escaped[i] = strdup("NULL");
+        } else {
+            escaped[i] = PQescapeLiteral(conn, vals[i], strlen(vals[i]));
+            if (!escaped[i]) escaped[i] = strdup("NULL");
+        }
+    }
+    /* Constrói a query substituindo ? pelos valores escapados */
+    char buf[8192];
+    int bi = 0, vi = 0;
+    for (int fi = 0; fmt[fi] && bi < (int)sizeof(buf)-1; fi++) {
+        if (fmt[fi] == '?' && vi < nvals) {
+            int len = (int)strlen(escaped[vi]);
+            if (bi + len < (int)sizeof(buf)-1) {
+                memcpy(buf+bi, escaped[vi], len);
+                bi += len;
+            }
+            vi++;
+        } else {
+            buf[bi++] = fmt[fi];
+        }
+    }
+    buf[bi] = '\0';
+    for (int i = 0; i < nvals && i < 16; i++) free(escaped[i]);
+    return PQexec(conn, buf);
+}
+
 /* ═══════════════════════════════════════════════════════════
    PRODUTOS
    ═══════════════════════════════════════════════════════════ */
@@ -94,9 +127,10 @@ static DbResult pg_get_produto_by_id(dp_db_t db, int id) {
     PG_CONN
     char sid[16]; snprintf(sid, sizeof(sid), "%d", id);
     const char *p[] = { sid };
-    PGresult *r = PQexecParams(conn, "SELECT id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
-                               "fornecedor_id,status,descricao,criado_em,atualizado_em "
-                               "FROM produtos WHERE id=$1", 1, NULL, p, NULL, NULL, 0);
+    PGresult *r = pg_exec_lit(conn,
+        "SELECT id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
+        "fornecedor_id,status,descricao,criado_em,atualizado_em "
+        "FROM produtos WHERE id=?", p, 1);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -107,12 +141,19 @@ static DbResult pg_save_produto(dp_db_t db, const char *body) {
     if (!j) { DbResult r={NULL,strdup("JSON inv\u00e1lido.")}; return r; }
     const char *nome      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *categoria = cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
-    const char *unidade   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
-    const char *descricao = cJSON_GetStringValue(cJSON_GetObjectItem(j,"descricao"));
-    const char *sku       = cJSON_GetStringValue(cJSON_GetObjectItem(j,"sku"));
-    const char *status_v  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
     if (!nome || !categoria) { cJSON_Delete(j); DbResult r={NULL,strdup("nome e categoria s\u00e3o obrigat\u00f3rios.")}; return r; }
-    char preco_s[32]="0", estoque_s[16]="0", emin_s[16]="10", fid_s[16]="";
+    char nome_s[256]="", cat_s[256]="", uni_s[64]="Un", preco_s[32]="0";
+    char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="";
+    snprintf(nome_s, sizeof(nome_s), "%s", nome);
+    snprintf(cat_s, sizeof(cat_s), "%s", categoria);
+    const char *unidade  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
+    const char *descricao= cJSON_GetStringValue(cJSON_GetObjectItem(j,"descricao"));
+    const char *sku      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"sku"));
+    const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
+    if (unidade)  snprintf(uni_s,  sizeof(uni_s),  "%s", unidade);
+    if (descricao)snprintf(desc_s, sizeof(desc_s), "%s", descricao);
+    if (sku)      snprintf(sku_s,  sizeof(sku_s),  "%s", sku);
+    if (status_v) snprintf(status_s,sizeof(status_s),"%s",status_v);
     cJSON *pr = cJSON_GetObjectItem(j,"preco");
     if (pr) snprintf(preco_s,sizeof(preco_s),"%.2f",pr->valuedouble);
     cJSON *es = cJSON_GetObjectItem(j,"estoque");
@@ -123,14 +164,14 @@ static DbResult pg_save_produto(dp_db_t db, const char *body) {
     cJSON *fid = cJSON_GetObjectItem(j,"fornecedor_id");
     const char *fid_p = NULL;
     if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
-    const char *p[] = { nome, categoria, unidade?unidade:"Un", preco_s, estoque_s, emin_s,
-                        sku?sku:NULL, fid_p, status_v?status_v:"Ativo", descricao?descricao:NULL };
-    PGresult *r = PQexecParams(conn,
-        "INSERT INTO produtos(nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao)"
-        " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"
-        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,criado_em,atualizado_em",
-        10, NULL, p, NULL, NULL, 0);
     cJSON_Delete(j);
+    const char *p[] = { nome_s, cat_s, uni_s, preco_s, estoque_s, emin_s,
+                        sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL };
+    PGresult *r = pg_exec_lit(conn,
+        "INSERT INTO produtos(nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao)"
+        " VALUES(?,?,?,?::numeric,?::int,?::int,?,?::int,?,?)"
+        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,criado_em,atualizado_em",
+        p, 10);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -140,13 +181,20 @@ static DbResult pg_update_produto(dp_db_t db, int id, const char *body) {
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON inv\u00e1lido.")}; return r; }
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
+    char nome_s[256]="", cat_s[256]="", uni_s[64]="Un", preco_s[32]="0";
+    char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="";
     const char *nome      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *categoria = cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
     const char *unidade   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
     const char *descricao = cJSON_GetStringValue(cJSON_GetObjectItem(j,"descricao"));
     const char *sku       = cJSON_GetStringValue(cJSON_GetObjectItem(j,"sku"));
     const char *status_v  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    char preco_s[32]="0", estoque_s[16]="0", emin_s[16]="10", fid_s[16]="";
+    if (nome)     snprintf(nome_s,  sizeof(nome_s),  "%s", nome);
+    if (categoria)snprintf(cat_s,   sizeof(cat_s),   "%s", categoria);
+    if (unidade)  snprintf(uni_s,   sizeof(uni_s),   "%s", unidade);
+    if (descricao)snprintf(desc_s,  sizeof(desc_s),  "%s", descricao);
+    if (sku)      snprintf(sku_s,   sizeof(sku_s),   "%s", sku);
+    if (status_v) snprintf(status_s,sizeof(status_s),"%s", status_v);
     cJSON *pr = cJSON_GetObjectItem(j,"preco");
     if (pr) snprintf(preco_s,sizeof(preco_s),"%.2f",pr->valuedouble);
     cJSON *es = cJSON_GetObjectItem(j,"estoque");
@@ -157,14 +205,14 @@ static DbResult pg_update_produto(dp_db_t db, int id, const char *body) {
     cJSON *fid = cJSON_GetObjectItem(j,"fornecedor_id");
     const char *fid_p = NULL;
     if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
-    const char *p[] = { sid, nome, categoria, unidade?unidade:"Un", preco_s, estoque_s, emin_s,
-                        sku?sku:NULL, fid_p, status_v?status_v:"Ativo", descricao?descricao:NULL };
-    PGresult *r = PQexecParams(conn,
-        "UPDATE produtos SET nome=$2,categoria=$3,unidade=$4,preco=$5,estoque=$6,estoque_min=$7,"
-        "sku=$8,fornecedor_id=$9,status=$10,descricao=$11,atualizado_em=NOW() WHERE id=$1"
-        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,criado_em,atualizado_em",
-        11, NULL, p, NULL, NULL, 0);
     cJSON_Delete(j);
+    const char *p[] = { nome_s, cat_s, uni_s, preco_s, estoque_s, emin_s,
+                        sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL, sid };
+    PGresult *r = pg_exec_lit(conn,
+        "UPDATE produtos SET nome=?,categoria=?,unidade=?,preco=?::numeric,estoque=?::int,estoque_min=?::int,"
+        "sku=?,fornecedor_id=?::int,status=?,descricao=?,atualizado_em=NOW() WHERE id=?::int"
+        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,criado_em,atualizado_em",
+        p, 11);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -173,7 +221,7 @@ static DbResult pg_delete_produto(dp_db_t db, int id) {
     PG_CONN
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[] = { sid };
-    PGresult *r = PQexecParams(conn,"DELETE FROM produtos WHERE id=$1",1,NULL,p,NULL,NULL,0);
+    PGresult *r = pg_exec_lit(conn,"DELETE FROM produtos WHERE id=?::int", p, 1);
     if (PQresultStatus(r) != PGRES_COMMAND_OK) return db_err(conn, r);
     return ok_deleted(r);
 }
@@ -201,7 +249,9 @@ static DbResult pg_get_cliente_by_id(dp_db_t db, int id) {
     PG_CONN
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[]={sid};
-    PGresult *r = PQexecParams(conn,"SELECT id,nome,tipo,doc,email,tel,cidade,estado,limite,status,criado_em,atualizado_em FROM clientes WHERE id=$1",1,NULL,p,NULL,NULL,0);
+    PGresult *r = pg_exec_lit(conn,
+        "SELECT id,nome,tipo,doc,email,tel,cidade,estado,limite,status,criado_em,atualizado_em"
+        " FROM clientes WHERE id=?::int", p, 1);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -213,22 +263,31 @@ static DbResult pg_save_cliente(dp_db_t db, const char *body) {
     const char *nome   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *email  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
     if (!nome||!email) { cJSON_Delete(j); DbResult r={NULL,strdup("nome e email s\u00e3o obrigat\u00f3rios.")}; return r; }
+    char nome_s[256]="",email_s[256]="",tipo_s[32]="PJ",doc_s[64]="",tel_s[64]="";
+    char cidade_s[128]="",estado_s[8]="",limite_s[32]="0",status_s[64]="Ativo";
+    snprintf(nome_s, sizeof(nome_s), "%s", nome);
+    snprintf(email_s,sizeof(email_s),"%s", email);
     const char *tipo   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tipo"));
     const char *doc    = cJSON_GetStringValue(cJSON_GetObjectItem(j,"doc"));
     const char *tel    = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tel"));
     const char *cidade = cJSON_GetStringValue(cJSON_GetObjectItem(j,"cidade"));
     const char *estado = cJSON_GetStringValue(cJSON_GetObjectItem(j,"estado"));
     const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    char limite_s[32]="0";
+    if (tipo)    snprintf(tipo_s,  sizeof(tipo_s),  "%s", tipo);
+    if (doc)     snprintf(doc_s,   sizeof(doc_s),   "%s", doc);
+    if (tel)     snprintf(tel_s,   sizeof(tel_s),   "%s", tel);
+    if (cidade)  snprintf(cidade_s,sizeof(cidade_s),"%s", cidade);
+    if (estado)  snprintf(estado_s,sizeof(estado_s),"%s", estado);
+    if (status_v)snprintf(status_s,sizeof(status_s),"%s", status_v);
     cJSON *lim = cJSON_GetObjectItem(j,"limite");
     if (lim) snprintf(limite_s,sizeof(limite_s),"%.2f",lim->valuedouble);
-    const char *p[]={nome,tipo?tipo:"PJ",doc,email,tel,cidade,estado,limite_s,status_v?status_v:"Ativo"};
-    PGresult *r = PQexecParams(conn,
-        "INSERT INTO clientes(nome,tipo,doc,email,tel,cidade,estado,limite,status)"
-        " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)"
-        " RETURNING id,nome,tipo,doc,email,tel,cidade,estado,limite,status,criado_em,atualizado_em",
-        9,NULL,p,NULL,NULL,0);
     cJSON_Delete(j);
+    const char *p[]={nome_s,tipo_s,doc_s,email_s,tel_s,cidade_s,estado_s,limite_s,status_s};
+    PGresult *r = pg_exec_lit(conn,
+        "INSERT INTO clientes(nome,tipo,doc,email,tel,cidade,estado,limite,status)"
+        " VALUES(?,?,?,?,?,?,?,?::numeric,?)"
+        " RETURNING id,nome,tipo,doc,email,tel,cidade,estado,limite,status,criado_em,atualizado_em",
+        p, 9);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -238,6 +297,8 @@ static DbResult pg_update_cliente(dp_db_t db, int id, const char *body) {
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON inv\u00e1lido.")}; return r; }
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
+    char nome_s[256]="",email_s[256]="",tipo_s[32]="PJ",doc_s[64]="",tel_s[64]="";
+    char cidade_s[128]="",estado_s[8]="",limite_s[32]="0",status_s[64]="Ativo";
     const char *nome   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *email  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
     const char *tipo   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tipo"));
@@ -246,15 +307,22 @@ static DbResult pg_update_cliente(dp_db_t db, int id, const char *body) {
     const char *cidade = cJSON_GetStringValue(cJSON_GetObjectItem(j,"cidade"));
     const char *estado = cJSON_GetStringValue(cJSON_GetObjectItem(j,"estado"));
     const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    char limite_s[32]="0";
+    if (nome)    snprintf(nome_s,  sizeof(nome_s),  "%s", nome);
+    if (email)   snprintf(email_s, sizeof(email_s), "%s", email);
+    if (tipo)    snprintf(tipo_s,  sizeof(tipo_s),  "%s", tipo);
+    if (doc)     snprintf(doc_s,   sizeof(doc_s),   "%s", doc);
+    if (tel)     snprintf(tel_s,   sizeof(tel_s),   "%s", tel);
+    if (cidade)  snprintf(cidade_s,sizeof(cidade_s),"%s", cidade);
+    if (estado)  snprintf(estado_s,sizeof(estado_s),"%s", estado);
+    if (status_v)snprintf(status_s,sizeof(status_s),"%s", status_v);
     cJSON *lim=cJSON_GetObjectItem(j,"limite");
     if (lim) snprintf(limite_s,sizeof(limite_s),"%.2f",lim->valuedouble);
-    const char *p[]={sid,nome,tipo?tipo:"PJ",doc,email,tel,cidade,estado,limite_s,status_v?status_v:"Ativo"};
-    PGresult *r = PQexecParams(conn,
-        "UPDATE clientes SET nome=$2,tipo=$3,doc=$4,email=$5,tel=$6,cidade=$7,estado=$8,limite=$9,status=$10,atualizado_em=NOW() WHERE id=$1"
-        " RETURNING id,nome,tipo,doc,email,tel,cidade,estado,limite,status,criado_em,atualizado_em",
-        10,NULL,p,NULL,NULL,0);
     cJSON_Delete(j);
+    const char *p[]={nome_s,tipo_s,doc_s,email_s,tel_s,cidade_s,estado_s,limite_s,status_s,sid};
+    PGresult *r = pg_exec_lit(conn,
+        "UPDATE clientes SET nome=?,tipo=?,doc=?,email=?,tel=?,cidade=?,estado=?,limite=?::numeric,status=?,atualizado_em=NOW() WHERE id=?::int"
+        " RETURNING id,nome,tipo,doc,email,tel,cidade,estado,limite,status,criado_em,atualizado_em",
+        p, 10);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -263,7 +331,7 @@ static DbResult pg_delete_cliente(dp_db_t db, int id) {
     PG_CONN
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[]={sid};
-    PGresult *r = PQexecParams(conn,"DELETE FROM clientes WHERE id=$1",1,NULL,p,NULL,NULL,0);
+    PGresult *r = pg_exec_lit(conn,"DELETE FROM clientes WHERE id=?::int", p, 1);
     if (PQresultStatus(r) != PGRES_COMMAND_OK) return db_err(conn, r);
     return ok_deleted(r);
 }
@@ -283,7 +351,9 @@ static DbResult pg_get_fornecedor_by_id(dp_db_t db, int id) {
     PG_CONN
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[]={sid};
-    PGresult *r = PQexecParams(conn,"SELECT id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em FROM fornecedores WHERE id=$1",1,NULL,p,NULL,NULL,0);
+    PGresult *r = pg_exec_lit(conn,
+        "SELECT id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em"
+        " FROM fornecedores WHERE id=?::int", p, 1);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -295,21 +365,29 @@ static DbResult pg_save_fornecedor(dp_db_t db, const char *body) {
     const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
     if (!nome||!email) { cJSON_Delete(j); DbResult r={NULL,strdup("nome e email s\u00e3o obrigat\u00f3rios.")}; return r; }
+    char nome_s[256]="",email_s[256]="",cnpj_s[32]="",contato_s[128]="";
+    char tel_s[64]="",cat_s[128]="",prazo_s[16]="0",status_s[64]="Ativo";
+    snprintf(nome_s, sizeof(nome_s), "%s", nome);
+    snprintf(email_s,sizeof(email_s),"%s", email);
     const char *cnpj     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"cnpj"));
     const char *contato  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"contato"));
     const char *tel      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tel"));
     const char *categoria= cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
     const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    char prazo_s[16]="0";
+    if (cnpj)    snprintf(cnpj_s,   sizeof(cnpj_s),   "%s", cnpj);
+    if (contato) snprintf(contato_s,sizeof(contato_s), "%s", contato);
+    if (tel)     snprintf(tel_s,    sizeof(tel_s),     "%s", tel);
+    if (categoria)snprintf(cat_s,   sizeof(cat_s),     "%s", categoria);
+    if (status_v)snprintf(status_s, sizeof(status_s),  "%s", status_v);
     cJSON *pr=cJSON_GetObjectItem(j,"prazo");
     if (pr) snprintf(prazo_s,sizeof(prazo_s),"%d",(int)pr->valuedouble);
-    const char *p[]={nome,cnpj,contato,email,tel,categoria,prazo_s,status_v?status_v:"Ativo"};
-    PGresult *r = PQexecParams(conn,
-        "INSERT INTO fornecedores(nome,cnpj,contato,email,tel,categoria,prazo,status)"
-        " VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
-        " RETURNING id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em",
-        8,NULL,p,NULL,NULL,0);
     cJSON_Delete(j);
+    const char *p[]={nome_s,cnpj_s,contato_s,email_s,tel_s,cat_s,prazo_s,status_s};
+    PGresult *r = pg_exec_lit(conn,
+        "INSERT INTO fornecedores(nome,cnpj,contato,email,tel,categoria,prazo,status)"
+        " VALUES(?,?,?,?,?,?,?::int,?)"
+        " RETURNING id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em",
+        p, 8);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -319,6 +397,8 @@ static DbResult pg_update_fornecedor(dp_db_t db, int id, const char *body) {
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON inv\u00e1lido.")}; return r; }
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
+    char nome_s[256]="",email_s[256]="",cnpj_s[32]="",contato_s[128]="";
+    char tel_s[64]="",cat_s[128]="",prazo_s[16]="0",status_s[64]="Ativo";
     const char *nome     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *cnpj     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"cnpj"));
     const char *contato  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"contato"));
@@ -326,15 +406,21 @@ static DbResult pg_update_fornecedor(dp_db_t db, int id, const char *body) {
     const char *tel      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"tel"));
     const char *categoria= cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
     const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    char prazo_s[16]="0";
+    if (nome)    snprintf(nome_s,   sizeof(nome_s),    "%s", nome);
+    if (cnpj)    snprintf(cnpj_s,   sizeof(cnpj_s),    "%s", cnpj);
+    if (contato) snprintf(contato_s,sizeof(contato_s), "%s", contato);
+    if (email)   snprintf(email_s,  sizeof(email_s),   "%s", email);
+    if (tel)     snprintf(tel_s,    sizeof(tel_s),     "%s", tel);
+    if (categoria)snprintf(cat_s,   sizeof(cat_s),     "%s", categoria);
+    if (status_v)snprintf(status_s, sizeof(status_s),  "%s", status_v);
     cJSON *pr=cJSON_GetObjectItem(j,"prazo");
     if (pr) snprintf(prazo_s,sizeof(prazo_s),"%d",(int)pr->valuedouble);
-    const char *p[]={sid,nome,cnpj,contato,email,tel,categoria,prazo_s,status_v?status_v:"Ativo"};
-    PGresult *r = PQexecParams(conn,
-        "UPDATE fornecedores SET nome=$2,cnpj=$3,contato=$4,email=$5,tel=$6,categoria=$7,prazo=$8,status=$9,atualizado_em=NOW() WHERE id=$1"
-        " RETURNING id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em",
-        9,NULL,p,NULL,NULL,0);
     cJSON_Delete(j);
+    const char *p[]={nome_s,cnpj_s,contato_s,email_s,tel_s,cat_s,prazo_s,status_s,sid};
+    PGresult *r = pg_exec_lit(conn,
+        "UPDATE fornecedores SET nome=?,cnpj=?,contato=?,email=?,tel=?,categoria=?,prazo=?::int,status=?,atualizado_em=NOW() WHERE id=?::int"
+        " RETURNING id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em",
+        p, 9);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -343,11 +429,10 @@ static DbResult pg_delete_fornecedor(dp_db_t db, int id) {
     PG_CONN
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[]={sid};
-    PGresult *r = PQexecParams(conn,"DELETE FROM fornecedores WHERE id=$1",1,NULL,p,NULL,NULL,0);
+    PGresult *r = pg_exec_lit(conn,"DELETE FROM fornecedores WHERE id=?::int", p, 1);
     if (PQresultStatus(r) != PGRES_COMMAND_OK) return db_err(conn, r);
     return ok_deleted(r);
 }
-
 /* ═══════════════════════════════════════════════════════════
    PEDIDOS
    ═══════════════════════════════════════════════════════════ */
@@ -577,6 +662,31 @@ static DbResult pg_get_usuario_by_id(dp_db_t db, int id) {
     return ok_item(r);
 }
 
+static DbResult pg_save_usuario(dp_db_t db, const char *body) {
+    PG_CONN
+    cJSON *j = cJSON_Parse(body);
+    if (!j) { DbResult r={NULL,strdup("JSON inválido.")}; return r; }
+    const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
+    const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
+    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j,"senha"));
+    if (!nome||!email||!senha) {
+        cJSON_Delete(j);
+        DbResult r={NULL,strdup("nome, email e senha são obrigatórios.")};
+        return r;
+    }
+    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(j,"role"));
+    if (!role) role = "operador";
+    cJSON_Delete(j);
+    const char *p[]={nome,email,senha,role};
+    PGresult *r = PQexecParams(conn,
+        "INSERT INTO usuarios(nome,email,senha_hash,role)"
+        " VALUES($1,$2,$3,$4)"
+        " RETURNING id,nome,email,role,criado_em,atualizado_em",
+        4,NULL,p,NULL,NULL,0);
+    if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
+    return ok_item(r);
+}
+
 static DbResult pg_update_usuario_perfil(dp_db_t db, int id, const char *nome, const char *new_email) {
     PG_CONN
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
@@ -678,6 +788,7 @@ static Repository s_pg_repo = {
     .ajustar_estoque          = pg_ajustar_estoque,
     .get_usuario_by_email     = pg_get_usuario_by_email,
     .get_usuario_by_id        = pg_get_usuario_by_id,
+    .save_usuario             = pg_save_usuario,
     .update_usuario_perfil    = pg_update_usuario_perfil,
     .update_usuario_senha     = pg_update_usuario_senha,
     .get_config               = pg_get_config,

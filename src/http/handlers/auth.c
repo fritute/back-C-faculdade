@@ -72,6 +72,56 @@ int auth_get_current_user(struct mg_http_message *hm) {
 
 /* ── Endpoints ──────────────────────────────────────────── */
 
+void handle_post_register(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
+    char *body = body_to_str(hm);
+    if (!body) { send_error_json(c, 400, "BAD_REQUEST", "Body ausente."); return; }
+    cJSON *j = cJSON_Parse(body);
+    if (!j) { free(body); send_error_json(c, 400, "BAD_REQUEST", "JSON inválido."); return; }
+    const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j, "nome"));
+    const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j, "email"));
+    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j, "senha"));
+    if (!nome || !email || !senha) {
+        cJSON_Delete(j); free(body);
+        send_error_json(c, 400, "VALIDATION_ERROR", "nome, email e senha são obrigatórios.");
+        return;
+    }
+    cJSON_Delete(j);
+    DbResult r = REPO->save_usuario(db, body);
+    free(body);
+    if (r.error) {
+        const char *msg = r.error;
+        int status = 500;
+        if (strstr(msg, "unique") || strstr(msg, "duplicate") || strstr(msg, "already")) status = 409;
+        send_error_json(c, status, status == 409 ? "CONFLICT" : "DB_ERROR", msg);
+        free(r.error);
+        return;
+    }
+    /* Auto-login: gera token e retorna no mesmo formato do /login */
+    cJSON *user_json = cJSON_Parse(r.json);
+    free(r.json);
+    cJSON *data = cJSON_GetObjectItem(user_json, "data");
+    int user_id = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(data, "id"));
+    const char *u_nome = cJSON_GetStringValue(cJSON_GetObjectItem(data, "nome"));
+    const char *u_role = cJSON_GetStringValue(cJSON_GetObjectItem(data, "role"));
+
+    char token[65];
+    generate_token(token);
+    store_session(token, user_id, u_role);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", 1);
+    cJSON *d = cJSON_AddObjectToObject(resp, "data");
+    cJSON_AddStringToObject(d, "token", token);
+    cJSON_AddNumberToObject(d, "userId", user_id);
+    cJSON_AddStringToObject(d, "nome", u_nome ? u_nome : "");
+    cJSON_AddStringToObject(d, "role", u_role ? u_role : "operador");
+    char *out = cJSON_PrintUnformatted(resp);
+    send_json(c, 201, out);
+    free(out);
+    cJSON_Delete(resp);
+    cJSON_Delete(user_json);
+}
+
 void handle_post_login(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
     char *body = body_to_str(hm);
     if (!body) { send_error_json(c, 400, "BAD_REQUEST", "Body ausente."); return; }
@@ -79,12 +129,15 @@ void handle_post_login(struct mg_connection *c, struct mg_http_message *hm, dp_d
     free(body);
     if (!j) { send_error_json(c, 400, "BAD_REQUEST", "JSON inválido."); return; }
     const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j, "email"));
-    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j, "senha"));
-    if (!email || !senha) {
+    const char *senha_raw = cJSON_GetStringValue(cJSON_GetObjectItem(j, "senha"));
+    if (!email || !senha_raw) {
         cJSON_Delete(j);
         send_error_json(c, 400, "VALIDATION_ERROR", "email e senha são obrigatórios.");
         return;
     }
+    /* Copia a senha antes de liberar o JSON de entrada */
+    char senha[256];
+    snprintf(senha, sizeof(senha), "%s", senha_raw);
     DbResult r = REPO->get_usuario_by_email(db, email);
     cJSON_Delete(j);
     if (r.error) {

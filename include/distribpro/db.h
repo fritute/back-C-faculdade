@@ -51,6 +51,7 @@ typedef struct {
     /* ---- Auth / Usuários ---- */
     DbResult (*get_usuario_by_email)(dp_db_t db, const char *email);
     DbResult (*get_usuario_by_id)(dp_db_t db, int id);
+    DbResult (*save_usuario)(dp_db_t db, const char *body);
     DbResult (*update_usuario_perfil)(dp_db_t db, int id, const char *nome, const char *new_email);
     DbResult (*update_usuario_senha)(dp_db_t db, int id, const char *senha_hash);
     /* ---- Config ---- */

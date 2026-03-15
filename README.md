@@ -219,10 +219,13 @@ Base URL: `http://localhost:8000/api/v1`
 ```json
 {
   "nome": "João Silva",
+  "tipo": "PF",
+  "doc": "123.456.789-00",
   "email": "joao@exemplo.com",
   "tel": "(11) 99999-0000",
-  "cpf_cnpj": "123.456.789-00",
-  "endereco": "Rua das Flores, 100",
+  "cidade": "São Paulo",
+  "estado": "SP",
+  "limite": 5000.00,
   "status": "Ativo"
 }
 ```
@@ -272,10 +275,12 @@ Base URL: `http://localhost:8000/api/v1`
 {
   "cliente_id": 1,
   "produto_id": 1,
-  "quantidade": 5,
-  "preco_unitario": 49.90,
+  "qtd": 5,
+  "valor": 249.50,
+  "destino": "Rua das Flores, 100 — São Paulo, SP",
+  "data": "2025-06-01",
   "status": "Pendente",
-  "previsao_entrega": "2025-06-01"
+  "obs": "Entregar no período da tarde"
 }
 ```
 

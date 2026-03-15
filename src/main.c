@@ -45,6 +45,7 @@ void handle_post_logout(struct mg_connection *c, struct mg_http_message *hm, dp_
 void handle_get_me(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_put_perfil(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_put_senha(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_post_register(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 /* ── Config ── */
 void handle_get_config(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_put_config(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
@@ -110,6 +111,7 @@ int main(void) {
         {"GET",    "/api/v1/estoque",                  handle_get_estoque},
         {"PATCH",  "/api/v1/estoque/*",                handle_patch_estoque},
         /* Auth */
+        {"POST",   "/api/v1/auth/register",            handle_post_register},
         {"POST",   "/api/v1/auth/login",               handle_post_login},
         {"POST",   "/api/v1/auth/logout",              handle_post_logout},
         {"GET",    "/api/v1/auth/me",                  handle_get_me},
