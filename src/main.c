@@ -46,6 +46,18 @@ void handle_get_me(struct mg_connection *c, struct mg_http_message *hm, dp_db_t 
 void handle_put_perfil(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_put_senha(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_post_register(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_post_register_cliente(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_post_register_fornecedor(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+/* ── Meus Pedidos (area cliente) ── */
+void handle_get_meus_pedidos(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_get_meu_pedido_by_id(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_get_meu_pedido_status(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+/* ── Relatorios ── */
+void handle_get_relatorio_vendas(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_get_relatorio_vendas_produto(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_get_relatorio_vendas_cliente(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_get_relatorio_estoque(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_get_relatorio_financeiro(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 /* ── Config ── */
 void handle_get_config(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_put_config(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
@@ -112,11 +124,23 @@ int main(void) {
         {"PATCH",  "/api/v1/estoque/*",                handle_patch_estoque},
         /* Auth */
         {"POST",   "/api/v1/auth/register",            handle_post_register},
+        {"POST",   "/api/v1/auth/register-cliente",     handle_post_register_cliente},
+        {"POST",   "/api/v1/auth/register-fornecedor",  handle_post_register_fornecedor},
         {"POST",   "/api/v1/auth/login",               handle_post_login},
         {"POST",   "/api/v1/auth/logout",              handle_post_logout},
         {"GET",    "/api/v1/auth/me",                  handle_get_me},
         {"PUT",    "/api/v1/auth/perfil",              handle_put_perfil},
         {"PUT",    "/api/v1/auth/senha",               handle_put_senha},
+        /* Meus Pedidos (area do cliente) */
+        {"GET",    "/api/v1/meus-pedidos",             handle_get_meus_pedidos},
+        {"GET",    "/api/v1/meus-pedidos/*/status",    handle_get_meu_pedido_status},
+        {"GET",    "/api/v1/meus-pedidos/*",           handle_get_meu_pedido_by_id},
+        /* Relatorios */
+        {"GET",    "/api/v1/relatorios/vendas",           handle_get_relatorio_vendas},
+        {"GET",    "/api/v1/relatorios/vendas/produtos",  handle_get_relatorio_vendas_produto},
+        {"GET",    "/api/v1/relatorios/vendas/clientes",  handle_get_relatorio_vendas_cliente},
+        {"GET",    "/api/v1/relatorios/estoque",          handle_get_relatorio_estoque},
+        {"GET",    "/api/v1/relatorios/financeiro",       handle_get_relatorio_financeiro},
         /* Config */
         {"GET",    "/api/v1/config",                   handle_get_config},
         {"PUT",    "/api/v1/config",                   handle_put_config},

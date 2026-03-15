@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 
 CREATE TABLE IF NOT EXISTS fornecedores (
   id            SERIAL PRIMARY KEY,
+  usuario_id    INTEGER UNIQUE REFERENCES usuarios(id) ON DELETE SET NULL,
   nome          VARCHAR(200) NOT NULL,
   cnpj          VARCHAR(20),
   contato       VARCHAR(150),
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS produtos (
 
 CREATE TABLE IF NOT EXISTS clientes (
   id            SERIAL PRIMARY KEY,
+  usuario_id    INTEGER UNIQUE REFERENCES usuarios(id) ON DELETE SET NULL,
   nome          VARCHAR(200) NOT NULL,
   tipo          CHAR(2)      NOT NULL DEFAULT 'PJ',
   doc           VARCHAR(30),
@@ -59,15 +61,23 @@ CREATE TABLE IF NOT EXISTS clientes (
 CREATE TABLE IF NOT EXISTS pedidos (
   id            SERIAL PRIMARY KEY,
   cliente_id    INTEGER NOT NULL REFERENCES clientes(id)   ON DELETE RESTRICT,
-  produto_id    INTEGER NOT NULL REFERENCES produtos(id)   ON DELETE RESTRICT,
-  qtd           INTEGER NOT NULL,
-  valor         NUMERIC(12,2) NOT NULL,
+  valor         NUMERIC(12,2) NOT NULL DEFAULT 0,
   destino       VARCHAR(300),
   data_entrega  DATE,
   status        VARCHAR(20) NOT NULL DEFAULT 'Pendente',
   obs           TEXT,
   criado_em     TIMESTAMP NOT NULL DEFAULT NOW(),
   atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS itens_pedido (
+  id            SERIAL PRIMARY KEY,
+  pedido_id     INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  produto_id    INTEGER NOT NULL REFERENCES produtos(id) ON DELETE RESTRICT,
+  qtd           INTEGER NOT NULL,
+  preco_unit    NUMERIC(10,2) NOT NULL DEFAULT 0,
+  subtotal      NUMERIC(12,2) NOT NULL DEFAULT 0,
+  criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS config_empresa (
@@ -79,12 +89,25 @@ CREATE TABLE IF NOT EXISTS config_empresa (
   endereco      VARCHAR(300),
   atualizado_em TIMESTAMP NOT NULL DEFAULT NOW()
 );
+CREATE TABLE itens_pedido (
+  id            SERIAL PRIMARY KEY,
+  pedido_id     INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  produto_id    INTEGER NOT NULL REFERENCES produtos(id) ON DELETE RESTRICT,
+  qtd           INTEGER NOT NULL,
+  preco_unit    NUMERIC(10,2) NOT NULL,
+  subtotal      NUMERIC(12,2) NOT NULL,
+  criado_em     TIMESTAMP NOT NULL DEFAULT NOW()
+);
 
 -- Índices para performance
 CREATE INDEX IF NOT EXISTS idx_pedidos_status    ON pedidos(status);
 CREATE INDEX IF NOT EXISTS idx_pedidos_cliente   ON pedidos(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_pedidos_data      ON pedidos(data_entrega);
 CREATE INDEX IF NOT EXISTS idx_produtos_estoque  ON produtos(estoque);
+CREATE INDEX IF NOT EXISTS idx_itens_pedido_pedido  ON itens_pedido(pedido_id);
+CREATE INDEX IF NOT EXISTS idx_itens_pedido_produto ON itens_pedido(produto_id);
+CREATE INDEX IF NOT EXISTS idx_clientes_usuario     ON clientes(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_fornecedores_usuario  ON fornecedores(usuario_id);
 
 -- Dados iniciais (Admin padrão)
 INSERT INTO usuarios (nome, email, senha_hash, role) 

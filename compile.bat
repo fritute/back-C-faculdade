@@ -31,6 +31,8 @@ set SOURCES=%SRC_DIR%\main.c ^
     %SRC_DIR%\http\handlers\estoque.c ^
     %SRC_DIR%\http\handlers\auth.c ^
     %SRC_DIR%\http\handlers\config.c ^
+    %SRC_DIR%\http\handlers\meus_pedidos.c ^
+    %SRC_DIR%\http\handlers\relatorios.c ^
     %SRC_DIR%\db\repo.c ^
     %SRC_DIR%\utils\common.c ^
     %LIB_DIR%\mongoose.c ^

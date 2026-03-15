@@ -59,8 +59,6 @@ typedef struct {
 typedef struct {
     int id;
     int cliente_id;
-    int produto_id;
-    int qtd;
     double valor;
     char destino[300];
     char data_entrega[30];
@@ -69,6 +67,16 @@ typedef struct {
     char criado_em[30];
     char atualizado_em[30];
 } Pedido;
+
+typedef struct {
+    int id;
+    int pedido_id;
+    int produto_id;
+    int qtd;
+    double preco_unit;
+    double subtotal;
+    char criado_em[30];
+} ItemPedido;
 
 typedef struct {
     int id;

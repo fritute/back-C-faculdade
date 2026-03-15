@@ -85,6 +85,71 @@ Cria um novo usuário e já retorna o token (auto-login).
 
 ---
 
+### POST `/api/v1/auth/register-cliente`
+
+Cria um novo usuário com role `"cliente"` e já cria o perfil de cliente vinculado. Auto-login.
+
+**Body:**
+```json
+{
+  "nome": "Maria Souza",        // obrigatório
+  "email": "maria@email.com",   // obrigatório, único
+  "senha": "minhasenha",        // obrigatório
+  "tipo": "PF",                 // opcional (PF ou PJ, default: PF)
+  "doc": "123.456.789-00",      // opcional
+  "tel": "(11) 99999-0000",     // opcional
+  "cidade": "São Paulo",        // opcional
+  "estado": "SP"                // opcional
+}
+```
+
+**Resposta (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "token": "aabbccdd...",
+    "userId": 5,
+    "nome": "Maria Souza",
+    "role": "cliente"
+  }
+}
+```
+
+---
+
+### POST `/api/v1/auth/register-fornecedor`
+
+Cria um novo usuário com role `"fornecedor"` e já cria o perfil de fornecedor vinculado. Auto-login.
+
+**Body:**
+```json
+{
+  "nome": "Distribuidora ABC",  // obrigatório
+  "email": "abc@dist.com",      // obrigatório, único
+  "senha": "minhasenha",        // obrigatório
+  "cnpj": "12.345.678/0001-90", // opcional
+  "contato": "Carlos",          // opcional
+  "tel": "(11) 3333-4444",      // opcional
+  "categoria": "Bebidas"        // opcional
+}
+```
+
+**Resposta (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "token": "aabbccdd...",
+    "userId": 6,
+    "nome": "Distribuidora ABC",
+    "role": "fornecedor"
+  }
+}
+```
+
+---
+
 ### POST `/api/v1/auth/login`
 
 **Body:**
@@ -419,53 +484,38 @@ Exclui um fornecedor.
 
 ### GET `/api/v1/pedidos`
 
-Lista todos os pedidos (inclui nome do cliente e produto via JOIN).
+Lista todos os pedidos com seus itens (inclui nome do cliente via JOIN). Cada pedido contém um array `itens` com os produtos.
 
-**Campos retornados:** `id`, `cliente_id`, `cliente_nome`, `produto_id`, `produto_nome`, `qtd`, `valor`, `destino`, `data_entrega`, `status`, `obs`, `criado_em`, `atualizado_em`
+**Campos retornados:** `id`, `cliente_id`, `cliente_nome`, `valor`, `destino`, `data_entrega`, `status`, `obs`, `criado_em`, `atualizado_em`, `itens[]`
+
+**Campos de cada item:** `id`, `produto_id`, `produto_nome`, `qtd`, `preco_unit`, `subtotal`
 
 ---
 
 ### GET `/api/v1/pedidos/{id}`
 
-Retorna um pedido pelo ID (com JOINs).
+Retorna um pedido pelo ID com seus itens.
 
 ---
 
 ### GET `/api/v1/pedidos/recentes`
 
-Retorna os **5 pedidos mais recentes** (campos reduzidos).
-
-**Resposta (200):**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 10,
-      "cliente_nome": "Empresa XYZ",
-      "produto_nome": "Monitor 24pol",
-      "qtd": 5,
-      "valor": 4499.50,
-      "status": "Pendente",
-      "criado_em": "2026-03-14 21:48:37"
-    }
-  ]
-}
-```
+Retorna os **5 pedidos mais recentes** com seus itens.
 
 ---
 
 ### POST `/api/v1/pedidos`
 
-Cria um novo pedido. **Decrementa automaticamente o estoque do produto.**
+Cria um novo pedido com **múltiplos itens**. O valor total é calculado automaticamente a partir do preço dos produtos. **Decrementa o estoque** de cada produto dentro de uma transação.
 
 **Body:**
 ```json
 {
   "clienteId": 1,                // obrigatório (aceita "cliente_id")
-  "produtoId": 2,                // obrigatório (aceita "produto_id")
-  "qtd": 10,                     // obrigatório
-  "valor": 299.00,               // opcional (default: 0)
+  "itens": [                     // obrigatório, array não vazio
+    { "produtoId": 2, "qtd": 10 },
+    { "produtoId": 5, "qtd": 3 }
+  ],
   "destino": "São Paulo - SP",   // opcional
   "data": "2026-04-01",          // opcional (data de entrega)
   "status": "Pendente",          // opcional (default: "Pendente")
@@ -473,15 +523,35 @@ Cria um novo pedido. **Decrementa automaticamente o estoque do produto.**
 }
 ```
 
-**Resposta (201):** Pedido criado.
+**Resposta (201):** Pedido criado com itens e valor total calculado.
 
-> **Importante:** O estoque é decrementado automaticamente dentro de uma transação. Se `status = "Cancelado"`, o estoque NÃO é descontado.
+```json
+{
+  "success": true,
+  "data": {
+    "id": 10,
+    "cliente_id": 1,
+    "valor": 599.50,
+    "destino": "São Paulo - SP",
+    "status": "Pendente",
+    "criado_em": "2026-03-14 21:48:37",
+    "itens": [
+      { "id": 1, "produto_id": 2, "produto_nome": "Monitor 24pol", "qtd": 10, "preco_unit": 49.95, "subtotal": 499.50 },
+      { "id": 2, "produto_id": 5, "produto_nome": "Teclado USB", "qtd": 3, "preco_unit": 33.33, "subtotal": 100.00 }
+    ]
+  }
+}
+```
+
+> **Importante:** O estoque é decrementado automaticamente para cada item. Se `status = "Cancelado"`, o estoque NÃO é descontado. O `valor` total é calculado somando os subtotais dos itens (`preco_unit * qtd`).
 
 ---
 
 ### PUT `/api/v1/pedidos/{id}`
 
-Atualiza um pedido. Campos opcionais: `qtd`, `valor`, `destino`, `data`, `status`, `obs`.
+Atualiza metadados de um pedido. Campos opcionais: `valor`, `destino`, `data`, `status`, `obs`.
+
+> Nota: não altera os itens do pedido.
 
 ---
 
@@ -514,11 +584,70 @@ Atualiza apenas o status de um pedido.
 
 ### DELETE `/api/v1/pedidos/{id}`
 
-Exclui um pedido. **Repõe automaticamente o estoque** se o pedido não era `Cancelado`.
+Exclui um pedido. **Repõe automaticamente o estoque** de todos os itens se o pedido não era `Cancelado`.
 
 ---
 
-## 6. Dashboard
+## 6. Meus Pedidos (Área do Cliente)
+
+Endpoints para clientes autenticados visualizarem seus próprios pedidos. Requer autenticação com token de usuário que tenha perfil de cliente (criado via `/auth/register-cliente`).
+
+### GET `/api/v1/meus-pedidos`
+
+Lista todos os pedidos do cliente logado, com itens.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 10,
+      "valor": 599.50,
+      "destino": "São Paulo - SP",
+      "status": "Pendente",
+      "criado_em": "2026-03-14 21:48:37",
+      "itens": [
+        { "id": 1, "produto_id": 2, "produto_nome": "Monitor 24pol", "qtd": 10, "preco_unit": 49.95, "subtotal": 499.50 }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### GET `/api/v1/meus-pedidos/{id}`
+
+Retorna um pedido específico do cliente logado, com itens.
+
+**Headers:** `Authorization: Bearer <token>`
+
+---
+
+### GET `/api/v1/meus-pedidos/{id}/status`
+
+Retorna apenas o status de um pedido do cliente logado.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 10,
+    "status": "Em Rota",
+    "atualizado_em": "2026-03-14 22:00:00"
+  }
+}
+```
+
+---
+
+## 7. Dashboard
 
 ### GET `/api/v1/dashboard/kpis`
 
@@ -580,7 +709,7 @@ Total de pedidos agrupados por status.
 
 ---
 
-## 7. Estoque
+## 8. Estoque
 
 ### GET `/api/v1/estoque`
 
@@ -617,7 +746,7 @@ Define o estoque de um produto (valor absoluto, não incremento).
 
 ---
 
-## 8. Config Empresa
+## 9. Config Empresa
 
 ### GET `/api/v1/config`
 
@@ -657,6 +786,119 @@ Cria ou atualiza os dados da empresa (upsert).
 ```
 
 **Resposta (200):** Config atualizada com todos os campos.
+
+---
+
+## 10. Relatórios
+
+Endpoints para gerar relatórios de vendas, estoque e financeiro. Todos aceitam query parameters `inicio` e `fim` (formato `YYYY-MM-DD`) para filtrar por período.
+
+### GET `/api/v1/relatorios/vendas`
+
+Resumo geral de vendas no período.
+
+**Query params:** `?inicio=2026-01-01&fim=2026-03-31`
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "total_pedidos": 45,
+    "total_itens": 120,
+    "valor_total": 12500.00,
+    "periodo": { "inicio": "2026-01-01", "fim": "2026-03-31" },
+    "pedidos_por_status": [
+      { "status": "Entregue", "total": 30, "valor": 9000.00 },
+      { "status": "Pendente", "total": 15, "valor": 3500.00 }
+    ]
+  }
+}
+```
+
+---
+
+### GET `/api/v1/relatorios/vendas/produtos`
+
+Ranking de produtos mais vendidos no período.
+
+**Query params:** `?inicio=2026-01-01&fim=2026-03-31&limite=10`
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": [
+    { "produto_id": 2, "produto_nome": "Monitor 24pol", "qtd_vendida": 50, "valor_total": 24975.00 },
+    { "produto_id": 5, "produto_nome": "Teclado USB", "qtd_vendida": 30, "valor_total": 2999.70 }
+  ]
+}
+```
+
+---
+
+### GET `/api/v1/relatorios/vendas/clientes`
+
+Ranking de clientes com mais vendas no período.
+
+**Query params:** `?inicio=2026-01-01&fim=2026-03-31&limite=10`
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": [
+    { "cliente_id": 1, "cliente_nome": "Empresa XYZ", "total_pedidos": 15, "valor_total": 8500.00 }
+  ]
+}
+```
+
+---
+
+### GET `/api/v1/relatorios/estoque`
+
+Relatório completo do estoque atual.
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "total_produtos": 45,
+    "total_itens_estoque": 1200,
+    "valor_total_estoque": 58000.00,
+    "produtos_abaixo_minimo": 3,
+    "produtos": [
+      { "id": 1, "nome": "Cabo USB-C", "categoria": "Cabos", "estoque": 50, "estoque_min": 10, "preco": 15.90, "valor_estoque": 795.00, "status": "Ativo" }
+    ]
+  }
+}
+```
+
+---
+
+### GET `/api/v1/relatorios/financeiro`
+
+Relatório financeiro com faturamento por dia.
+
+**Query params:** `?inicio=2026-01-01&fim=2026-03-31`
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "faturamento_total": 12500.00,
+    "ticket_medio": 277.78,
+    "total_pedidos": 45,
+    "periodo": { "inicio": "2026-01-01", "fim": "2026-03-31" },
+    "faturamento_por_dia": [
+      { "dia": "2026-01-15", "total_pedidos": 3, "valor": 850.00 },
+      { "dia": "2026-01-16", "total_pedidos": 5, "valor": 1200.00 }
+    ]
+  }
+}
+```
 
 ---
 
@@ -703,7 +945,9 @@ const novo = await fetch(`${API}/produtos`, {
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| POST | `/auth/register` | Cadastro + auto-login |
+| POST | `/auth/register` | Cadastro + auto-login (operador) |
+| POST | `/auth/register-cliente` | Cadastro como cliente + auto-login |
+| POST | `/auth/register-fornecedor` | Cadastro como fornecedor + auto-login |
 | POST | `/auth/login` | Login |
 | POST | `/auth/logout` | Logout |
 | GET | `/auth/me` | Usuário logado |
@@ -726,13 +970,16 @@ const novo = await fetch(`${API}/produtos`, {
 | GET | `/fornecedores/{id}` | Fornecedor por ID |
 | PUT | `/fornecedores/{id}` | Atualizar fornecedor |
 | DELETE | `/fornecedores/{id}` | Excluir fornecedor |
-| GET | `/pedidos` | Listar pedidos |
-| POST | `/pedidos` | Criar pedido |
-| GET | `/pedidos/{id}` | Pedido por ID |
+| GET | `/pedidos` | Listar pedidos (com itens) |
+| POST | `/pedidos` | Criar pedido (multi-item) |
+| GET | `/pedidos/{id}` | Pedido por ID (com itens) |
 | PUT | `/pedidos/{id}` | Atualizar pedido |
 | PATCH | `/pedidos/{id}/status` | Alterar status |
 | DELETE | `/pedidos/{id}` | Excluir pedido |
 | GET | `/pedidos/recentes` | 5 pedidos recentes |
+| GET | `/meus-pedidos` | Pedidos do cliente logado |
+| GET | `/meus-pedidos/{id}` | Pedido do cliente por ID |
+| GET | `/meus-pedidos/{id}/status` | Status do pedido do cliente |
 | GET | `/dashboard/kpis` | KPIs gerais |
 | GET | `/dashboard/entregas` | Entregas por dia |
 | GET | `/dashboard/status-pedidos` | Pedidos por status |
@@ -740,3 +987,8 @@ const novo = await fetch(`${API}/produtos`, {
 | PATCH | `/estoque/{id}` | Ajustar estoque |
 | GET | `/config` | Dados da empresa |
 | PUT | `/config` | Atualizar empresa |
+| GET | `/relatorios/vendas` | Relatório de vendas |
+| GET | `/relatorios/vendas/produtos` | Ranking produtos vendidos |
+| GET | `/relatorios/vendas/clientes` | Ranking clientes |
+| GET | `/relatorios/estoque` | Relatório de estoque |
+| GET | `/relatorios/financeiro` | Relatório financeiro |
