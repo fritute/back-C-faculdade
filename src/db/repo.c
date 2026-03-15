@@ -69,7 +69,9 @@ static DbResult ok_deleted(PGresult *res) {
 }
 
 static DbResult db_err(PGconn *conn, PGresult *res) {
-    DbResult r = { NULL, strdup(PQerrorMessage(conn)) };
+    const char *msg = PQerrorMessage(conn);
+    fprintf(stderr, "[DB_ERROR] %s\n", msg);
+    DbResult r = { NULL, strdup(msg) };
     if (res) PQclear(res);
     return r;
 }
@@ -666,23 +668,26 @@ static DbResult pg_save_usuario(dp_db_t db, const char *body) {
     PG_CONN
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON inválido.")}; return r; }
-    const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
-    const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j,"email"));
-    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j,"senha"));
-    if (!nome||!email||!senha) {
+    const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j, "nome"));
+    const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j, "email"));
+    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j, "senha"));
+    if (!nome || !email || !senha) {
         cJSON_Delete(j);
         DbResult r={NULL,strdup("nome, email e senha são obrigatórios.")};
         return r;
     }
-    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(j,"role"));
+    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(j, "role"));
     if (!role) role = "operador";
-    cJSON_Delete(j);
-    const char *p[]={nome,email,senha,role};
+
+    const char *p[] = {nome, email, senha, role};
     PGresult *r = PQexecParams(conn,
-        "INSERT INTO usuarios(nome,email,senha_hash,role)"
-        " VALUES($1,$2,$3,$4)"
-        " RETURNING id,nome,email,role,criado_em,atualizado_em",
-        4,NULL,p,NULL,NULL,0);
+        "INSERT INTO usuarios(nome, email, senha_hash, role)"
+        " VALUES($1, $2, $3, $4)"
+        " RETURNING id, nome, email, role, criado_em, atualizado_em",
+        4, NULL, p, NULL, NULL, 0);
+
+    cJSON_Delete(j); /* Movido para DEPOIS do PQexecParams */
+
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }

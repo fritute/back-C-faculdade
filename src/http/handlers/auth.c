@@ -156,6 +156,7 @@ void handle_post_login(struct mg_connection *c, struct mg_http_message *hm, dp_d
     const char *nome = cJSON_GetStringValue(cJSON_GetObjectItem(data, "nome"));
 
     if (!stored_hash || strcmp(stored_hash, senha) != 0) {
+        printf("[AUTH] Falha de login para '%s': Senha incorreta ou usuario sem hash.\n", email);
         cJSON_Delete(user_json);
         send_error_json(c, 401, "UNAUTHORIZED", "Credenciais inválidas.");
         return;
