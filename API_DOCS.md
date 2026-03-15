@@ -61,10 +61,10 @@ Cria um novo usuário e já retorna o token (auto-login).
 
 **Body:**
 ```json
-{
   "nome": "João Silva",         // obrigatório
   "email": "joao@email.com",    // obrigatório, único
-  "senha": "minhasenha123"      // obrigatório
+  "senha": "minhasenha123",     // obrigatório
+  "role": "cliente"             // opcional (admin, operador ou cliente. Default: operador)
 }
 ```
 

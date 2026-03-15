@@ -31,6 +31,7 @@ dp_db_t db_init(const char *conn_str) {
             free(handle);
             return NULL;
         }
+        PQsetClientEncoding((PGconn*)handle->conn, "UTF8");
     } else {
         handle->is_postgres = 0;
         printf("Connecting to Local DB (SQLite)...\n");
