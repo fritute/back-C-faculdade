@@ -219,6 +219,110 @@ void handle_put_perfil(struct mg_connection *c, struct mg_http_message *hm, dp_d
     free(r.json);
 }
 
+void handle_post_register_cliente(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
+    char *body = body_to_str(hm);
+    if (!body) { send_error_json(c, 400, "BAD_REQUEST", "Body ausente."); return; }
+    cJSON *j = cJSON_Parse(body);
+    if (!j) { free(body); send_error_json(c, 400, "BAD_REQUEST", "JSON invalido."); return; }
+    const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j, "nome"));
+    const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j, "email"));
+    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j, "senha"));
+    if (!nome || !email || !senha) {
+        cJSON_Delete(j); free(body);
+        send_error_json(c, 400, "VALIDATION_ERROR", "nome, email e senha sao obrigatorios.");
+        return;
+    }
+    cJSON_Delete(j);
+    DbResult r = REPO->save_usuario_with_role(db, body, "cliente");
+    if (r.error) {
+        int status = 500;
+        if (strstr(r.error, "unique") || strstr(r.error, "duplicate") || strstr(r.error, "already")) status = 409;
+        send_error_json(c, status, status == 409 ? "CONFLICT" : "DB_ERROR", r.error);
+        free(r.error); free(body);
+        return;
+    }
+    /* Auto-login + cria registro em clientes */
+    cJSON *user_json = cJSON_Parse(r.json);
+    free(r.json);
+    cJSON *data = cJSON_GetObjectItem(user_json, "data");
+    int user_id = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(data, "id"));
+    const char *u_nome = cJSON_GetStringValue(cJSON_GetObjectItem(data, "nome"));
+    const char *u_role = cJSON_GetStringValue(cJSON_GetObjectItem(data, "role"));
+
+    /* Cria perfil cliente vinculado */
+    REPO->save_cliente_for_user(db, user_id, body);
+    free(body);
+
+    char token[65];
+    generate_token(token);
+    store_session(token, user_id, u_role);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", 1);
+    cJSON *d = cJSON_AddObjectToObject(resp, "data");
+    cJSON_AddStringToObject(d, "token", token);
+    cJSON_AddNumberToObject(d, "userId", user_id);
+    cJSON_AddStringToObject(d, "nome", u_nome ? u_nome : "");
+    cJSON_AddStringToObject(d, "role", "cliente");
+    char *out = cJSON_PrintUnformatted(resp);
+    send_json(c, 201, out);
+    free(out);
+    cJSON_Delete(resp);
+    cJSON_Delete(user_json);
+}
+
+void handle_post_register_fornecedor(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
+    char *body = body_to_str(hm);
+    if (!body) { send_error_json(c, 400, "BAD_REQUEST", "Body ausente."); return; }
+    cJSON *j = cJSON_Parse(body);
+    if (!j) { free(body); send_error_json(c, 400, "BAD_REQUEST", "JSON invalido."); return; }
+    const char *nome  = cJSON_GetStringValue(cJSON_GetObjectItem(j, "nome"));
+    const char *email = cJSON_GetStringValue(cJSON_GetObjectItem(j, "email"));
+    const char *senha = cJSON_GetStringValue(cJSON_GetObjectItem(j, "senha"));
+    if (!nome || !email || !senha) {
+        cJSON_Delete(j); free(body);
+        send_error_json(c, 400, "VALIDATION_ERROR", "nome, email e senha sao obrigatorios.");
+        return;
+    }
+    cJSON_Delete(j);
+    DbResult r = REPO->save_usuario_with_role(db, body, "fornecedor");
+    if (r.error) {
+        int status = 500;
+        if (strstr(r.error, "unique") || strstr(r.error, "duplicate") || strstr(r.error, "already")) status = 409;
+        send_error_json(c, status, status == 409 ? "CONFLICT" : "DB_ERROR", r.error);
+        free(r.error); free(body);
+        return;
+    }
+    /* Auto-login + cria registro em fornecedores */
+    cJSON *user_json = cJSON_Parse(r.json);
+    free(r.json);
+    cJSON *data = cJSON_GetObjectItem(user_json, "data");
+    int user_id = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(data, "id"));
+    const char *u_nome = cJSON_GetStringValue(cJSON_GetObjectItem(data, "nome"));
+    const char *u_role = cJSON_GetStringValue(cJSON_GetObjectItem(data, "role"));
+
+    /* Cria perfil fornecedor vinculado */
+    REPO->save_fornecedor_for_user(db, user_id, body);
+    free(body);
+
+    char token[65];
+    generate_token(token);
+    store_session(token, user_id, u_role);
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", 1);
+    cJSON *d = cJSON_AddObjectToObject(resp, "data");
+    cJSON_AddStringToObject(d, "token", token);
+    cJSON_AddNumberToObject(d, "userId", user_id);
+    cJSON_AddStringToObject(d, "nome", u_nome ? u_nome : "");
+    cJSON_AddStringToObject(d, "role", "fornecedor");
+    char *out = cJSON_PrintUnformatted(resp);
+    send_json(c, 201, out);
+    free(out);
+    cJSON_Delete(resp);
+    cJSON_Delete(user_json);
+}
+
 void handle_put_senha(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
     int uid = auth_get_current_user(hm);
     if (uid < 0) { send_error_json(c, 401, "UNAUTHORIZED", "Token inválido ou expirado."); return; }

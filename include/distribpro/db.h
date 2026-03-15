@@ -41,6 +41,10 @@ typedef struct {
     DbResult (*update_pedido_status)(dp_db_t db, int id, const char *status);
     DbResult (*delete_pedido)(dp_db_t db, int id);
     DbResult (*get_pedidos_recentes)(dp_db_t db);
+    /* ---- Meus Pedidos (cliente) ---- */
+    DbResult (*get_meus_pedidos)(dp_db_t db, int usuario_id);
+    DbResult (*get_meu_pedido_by_id)(dp_db_t db, int usuario_id, int pedido_id);
+    DbResult (*get_meu_pedido_status)(dp_db_t db, int usuario_id, int pedido_id);
     /* ---- Dashboard ---- */
     DbResult (*get_dashboard_kpis)(dp_db_t db);
     DbResult (*get_dashboard_entregas)(dp_db_t db, int dias);
@@ -52,11 +56,22 @@ typedef struct {
     DbResult (*get_usuario_by_email)(dp_db_t db, const char *email);
     DbResult (*get_usuario_by_id)(dp_db_t db, int id);
     DbResult (*save_usuario)(dp_db_t db, const char *body);
+    DbResult (*save_usuario_with_role)(dp_db_t db, const char *body, const char *role);
+    DbResult (*get_cliente_by_usuario_id)(dp_db_t db, int usuario_id);
+    DbResult (*get_fornecedor_by_usuario_id)(dp_db_t db, int usuario_id);
+    DbResult (*save_cliente_for_user)(dp_db_t db, int usuario_id, const char *body);
+    DbResult (*save_fornecedor_for_user)(dp_db_t db, int usuario_id, const char *body);
     DbResult (*update_usuario_perfil)(dp_db_t db, int id, const char *nome, const char *new_email);
     DbResult (*update_usuario_senha)(dp_db_t db, int id, const char *senha_hash);
     /* ---- Config ---- */
     DbResult (*get_config)(dp_db_t db);
     DbResult (*update_config)(dp_db_t db, const char *body);
+    /* ---- Relatórios ---- */
+    DbResult (*relatorio_vendas)(dp_db_t db, const char *inicio, const char *fim);
+    DbResult (*relatorio_vendas_por_produto)(dp_db_t db, const char *inicio, const char *fim, int limite);
+    DbResult (*relatorio_vendas_por_cliente)(dp_db_t db, const char *inicio, const char *fim, int limite);
+    DbResult (*relatorio_estoque)(dp_db_t db);
+    DbResult (*relatorio_financeiro)(dp_db_t db, const char *inicio, const char *fim);
 } Repository;
 
 Repository* get_repository(const char *conn_str);
