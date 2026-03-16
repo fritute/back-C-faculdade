@@ -282,6 +282,7 @@ Lista todos os produtos.
       "fornecedor_id": null,
       "status": "Ativo",
       "descricao": "Cabo USB-C para carregamento",
+      "img_produtos": null,
       "criado_em": "2026-03-14 21:48:37",
       "atualizado_em": "2026-03-14 21:48:37"
     }
@@ -313,7 +314,8 @@ Cria um novo produto.
   "sku": "SKU-MON-24",           // opcional
   "fornecedor_id": 1,            // opcional
   "status": "Ativo",             // opcional (default: "Ativo")
-  "descricao": "Monitor Full HD" // opcional
+  "descricao": "Monitor Full HD", // opcional
+  "img_produtos": "https://..."  // opcional — URL da imagem (ver endpoint de upload)
 }
 ```
 
@@ -323,7 +325,7 @@ Cria um novo produto.
 
 ### PUT `/api/v1/produtos/{id}`
 
-Atualiza um produto. Mesmos campos do POST (todos opcionais no update).
+Atualiza um produto. Mesmos campos do POST (todos opcionais no update), incluindo `img_produtos`.
 
 **Resposta (200):** Produto atualizado.
 
@@ -346,6 +348,56 @@ Exclui um produto.
   "data": { "message": "Registro excluído com sucesso." }
 }
 ```
+
+---
+
+### POST `/api/v1/produtos/{id}/imagem`
+
+Faz upload da imagem do produto para o **Supabase Storage** e salva a URL pública no campo `img_produtos`.
+
+**Content-Type:** `multipart/form-data`
+
+**Campo do formulário:** `imagem` — arquivo de imagem (JPEG, PNG, GIF ou WebP, máximo **5 MB**)
+
+**Variáveis de ambiente necessárias no servidor:**
+| Variável | Descrição |
+|---|---|
+| `SUPABASE_URL` | URL base do projeto, ex.: `https://xyzabc.supabase.co` |
+| `SUPABASE_SERVICE_KEY` | Service Role Key (JWT) — **nunca exponha no front-end** |
+| `SUPABASE_BUCKET` | Nome do bucket de storage (padrão: `imagens_produtos`) |
+
+**Exemplo (frontend):**
+```js
+const form = new FormData();
+form.append("imagem", arquivo); // File do <input type="file">
+
+const res = await fetch(`${API}/produtos/3/imagem`, {
+  method: "POST",
+  headers: { "Authorization": `Bearer ${token}` },
+  body: form,
+});
+const { data } = await res.json();
+// data.img_produtos contém a URL pública da imagem
+```
+
+**Resposta (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 3,
+    "nome": "Monitor 24pol",
+    "img_produtos": "https://xyzabc.supabase.co/storage/v1/object/public/imagens_produtos/produto_3_1742140800.jpg"
+  }
+}
+```
+
+**Erros possíveis:**
+| Código HTTP | Código | Descrição |
+|---|---|---|
+| 400 | `BAD_REQUEST` | ID inválido, campo `imagem` ausente ou Content-Type errado |
+| 413 | `FILE_TOO_LARGE` | Arquivo maior que 5 MB |
+| 502 | `UPLOAD_ERROR` | Falha na comunicação com o Supabase Storage |
 
 ---
 

@@ -12,6 +12,7 @@ void handle_put_produto(struct mg_connection *c, struct mg_http_message *hm, dp_
 void handle_patch_produto(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_delete_produto(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_get_estoque_baixo(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
+void handle_post_produto_imagem(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 /* ── Clientes ── */
 void handle_get_clientes(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
 void handle_get_cliente_by_id(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db);
@@ -87,6 +88,8 @@ int main(void) {
         {"GET",    "/health",                          handle_get_clientes},
         /* estoque-baixo ANTES de produtos wildcard */
         {"GET",    "/api/v1/produtos/estoque-baixo",   handle_get_estoque_baixo},
+        /* imagem: ANTES dos wildcards de produto */
+        {"POST",   "/api/v1/produtos/*/imagem",         handle_post_produto_imagem},
         /* Produtos */
         {"GET",    "/api/v1/produtos",                 handle_get_produtos},
         {"POST",   "/api/v1/produtos",                 handle_post_produtos},

@@ -5,11 +5,11 @@ CC = gcc
 ifeq ($(OS),Windows_NT)
     PG_PATH    = C:/msys64/ucrt64
     CFLAGS     = -Iinclude -Ilibs -I"$(PG_PATH)/include" -Wall
-    LIBS       = -lws2_32 -L"$(PG_PATH)/lib" -lpq
+    LIBS       = -lws2_32 -L"$(PG_PATH)/lib" -lpq -lcurl
     TARGET     = $(BIN_DIR)/distribpro.exe
 else
     CFLAGS     = -Iinclude -Ilibs -I$(shell pg_config --includedir) -Wall
-    LIBS       = -lpq
+    LIBS       = -lpq -lcurl
     TARGET     = $(BIN_DIR)/distribpro
 endif
 
@@ -32,6 +32,7 @@ SOURCES = $(SRC_DIR)/main.c \
           $(SRC_DIR)/http/handlers/relatorios.c \
           $(SRC_DIR)/db/repo.c \
           $(SRC_DIR)/utils/common.c \
+          $(SRC_DIR)/utils/supabase_storage.c \
           $(LIB_DIR)/mongoose.c \
           $(LIB_DIR)/cJSON.c
 

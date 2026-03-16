@@ -116,7 +116,7 @@ static PGresult *pg_exec_lit(PGconn *conn, const char *fmt, const char * const v
 static DbResult pg_get_produtos(dp_db_t db) {
     PG_CONN
     PGresult *r = PQexec(conn, "SELECT id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
-                               "fornecedor_id,status,descricao,criado_em,atualizado_em "
+                               "fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em "
                                "FROM produtos ORDER BY id");
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_list(r);
@@ -128,7 +128,7 @@ static DbResult pg_get_produto_by_id(dp_db_t db, int id) {
     const char *p[] = { sid };
     PGresult *r = pg_exec_lit(conn,
         "SELECT id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
-        "fornecedor_id,status,descricao,criado_em,atualizado_em "
+        "fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em "
         "FROM produtos WHERE id=?", p, 1);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
@@ -142,17 +142,19 @@ static DbResult pg_save_produto(dp_db_t db, const char *body) {
     const char *categoria = cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
     if (!nome || !categoria) { cJSON_Delete(j); DbResult r={NULL,strdup("nome e categoria sao obrigatorios.")}; return r; }
     char nome_s[256]="", cat_s[256]="", uni_s[64]="Un", preco_s[32]="0";
-    char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="";
+    char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="", img_s[512]="";
     snprintf(nome_s, sizeof(nome_s), "%s", nome);
     snprintf(cat_s, sizeof(cat_s), "%s", categoria);
     const char *unidade  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
     const char *descricao= cJSON_GetStringValue(cJSON_GetObjectItem(j,"descricao"));
     const char *sku      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"sku"));
     const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
+    const char *img      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"img_produtos"));
     if (unidade)  snprintf(uni_s,  sizeof(uni_s),  "%s", unidade);
     if (descricao)snprintf(desc_s, sizeof(desc_s), "%s", descricao);
     if (sku)      snprintf(sku_s,  sizeof(sku_s),  "%s", sku);
     if (status_v) snprintf(status_s,sizeof(status_s),"%s",status_v);
+    if (img)      snprintf(img_s,  sizeof(img_s),  "%s", img);
     cJSON *pr = cJSON_GetObjectItem(j,"preco");
     if (pr) snprintf(preco_s,sizeof(preco_s),"%.2f",pr->valuedouble);
     cJSON *es = cJSON_GetObjectItem(j,"estoque");
@@ -165,12 +167,13 @@ static DbResult pg_save_produto(dp_db_t db, const char *body) {
     if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
     cJSON_Delete(j);
     const char *p[] = { nome_s, cat_s, uni_s, preco_s, estoque_s, emin_s,
-                        sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL };
+                        sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL,
+                        img_s[0]?img_s:NULL };
     PGresult *r = pg_exec_lit(conn,
-        "INSERT INTO produtos(nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao)"
-        " VALUES(?,?,?,?::numeric,?::int,?::int,?,?::int,?,?)"
-        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,criado_em,atualizado_em",
-        p, 10);
+        "INSERT INTO produtos(nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos)"
+        " VALUES(?,?,?,?::numeric,?::int,?::int,?,?::int,?,?,?)"
+        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em",
+        p, 11);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -181,19 +184,21 @@ static DbResult pg_update_produto(dp_db_t db, int id, const char *body) {
     if (!j) { DbResult r={NULL,strdup("JSON invalido.")}; return r; }
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     char nome_s[256]="", cat_s[256]="", uni_s[64]="Un", preco_s[32]="0";
-    char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="";
+    char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="", img_s[512]="";
     const char *nome      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *categoria = cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
     const char *unidade   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
     const char *descricao = cJSON_GetStringValue(cJSON_GetObjectItem(j,"descricao"));
     const char *sku       = cJSON_GetStringValue(cJSON_GetObjectItem(j,"sku"));
     const char *status_v  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
+    const char *img       = cJSON_GetStringValue(cJSON_GetObjectItem(j,"img_produtos"));
     if (nome)     snprintf(nome_s,  sizeof(nome_s),  "%s", nome);
     if (categoria)snprintf(cat_s,   sizeof(cat_s),   "%s", categoria);
     if (unidade)  snprintf(uni_s,   sizeof(uni_s),   "%s", unidade);
     if (descricao)snprintf(desc_s,  sizeof(desc_s),  "%s", descricao);
     if (sku)      snprintf(sku_s,   sizeof(sku_s),   "%s", sku);
     if (status_v) snprintf(status_s,sizeof(status_s),"%s", status_v);
+    if (img)      snprintf(img_s,   sizeof(img_s),   "%s", img);
     cJSON *pr = cJSON_GetObjectItem(j,"preco");
     if (pr) snprintf(preco_s,sizeof(preco_s),"%.2f",pr->valuedouble);
     cJSON *es = cJSON_GetObjectItem(j,"estoque");
@@ -206,13 +211,27 @@ static DbResult pg_update_produto(dp_db_t db, int id, const char *body) {
     if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
     cJSON_Delete(j);
     const char *p[] = { nome_s, cat_s, uni_s, preco_s, estoque_s, emin_s,
-                        sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL, sid };
+                        sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL,
+                        img_s[0]?img_s:NULL, sid };
     PGresult *r = pg_exec_lit(conn,
         "UPDATE produtos SET nome=?,categoria=?,unidade=?,preco=?::numeric,estoque=?::int,estoque_min=?::int,"
-        "sku=?,fornecedor_id=?::int,status=?,descricao=?,atualizado_em=NOW() WHERE id=?::int"
-        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,criado_em,atualizado_em",
-        p, 11);
+        "sku=?,fornecedor_id=?::int,status=?,descricao=?,img_produtos=?,atualizado_em=NOW() WHERE id=?::int"
+        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em",
+        p, 12);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
+    return ok_item(r);
+}
+
+static DbResult pg_update_produto_imagem(dp_db_t db, int id, const char *img_url) {
+    PG_CONN
+    char sid[16]; snprintf(sid, sizeof(sid), "%d", id);
+    const char *p[] = { img_url, sid };
+    PGresult *r = pg_exec_lit(conn,
+        "UPDATE produtos SET img_produtos=?,atualizado_em=NOW() WHERE id=?::int"
+        " RETURNING id,nome,img_produtos",
+        p, 2);
+    if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
+    if (PQntuples(r) == 0) { PQclear(r); DbResult rr={NULL,strdup("NOT_FOUND")}; return rr; }
     return ok_item(r);
 }
 
@@ -1134,6 +1153,7 @@ static Repository s_pg_repo = {
     .get_produto_by_id        = pg_get_produto_by_id,
     .save_produto             = pg_save_produto,
     .update_produto           = pg_update_produto,
+    .update_produto_imagem    = pg_update_produto_imagem,
     .delete_produto           = pg_delete_produto,
     .get_estoque_baixo        = pg_get_estoque_baixo,
     .get_clientes             = pg_get_clientes,

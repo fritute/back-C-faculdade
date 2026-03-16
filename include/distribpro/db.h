@@ -19,6 +19,7 @@ typedef struct {
     DbResult (*get_produto_by_id)(dp_db_t db, int id);
     DbResult (*save_produto)(dp_db_t db, const char *body);
     DbResult (*update_produto)(dp_db_t db, int id, const char *body);
+    DbResult (*update_produto_imagem)(dp_db_t db, int id, const char *img_url);
     DbResult (*delete_produto)(dp_db_t db, int id);
     DbResult (*get_estoque_baixo)(dp_db_t db);
     /* ---- Clientes ---- */
