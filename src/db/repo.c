@@ -551,30 +551,28 @@ static DbResult pg_save_pedido(dp_db_t db, const char *body) {
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON invalido.")}; return r; }
     cJSON *cid=cJSON_GetObjectItem(j,"clienteId"); if(!cid) cid=cJSON_GetObjectItem(j,"cliente_id");
-    cJSON *itens=cJSON_GetObjectItem(j,"itens");
-    if (!cid||!itens||!cJSON_IsArray(itens)||cJSON_GetArraySize(itens)==0) {
-        cJSON_Delete(j);
-        DbResult r={NULL,strdup("clienteId e itens (array nao vazio) sao obrigatorios.")};
-        return r;
-    }
-    char cid_s[16];
+    cJSON *pid=cJSON_GetObjectItem(j,"produtoId");  if(!pid) pid=cJSON_GetObjectItem(j,"produto_id");
+    cJSON *qtd=cJSON_GetObjectItem(j,"qtd");
+    if (!cid||!pid||!qtd) { cJSON_Delete(j); DbResult r={NULL,strdup("clienteId, produtoId e qtd sao obrigatorios.")}; return r; }
+    char cid_s[16],pid_s[16],qtd_s[16],valor_s[32]="0";
     snprintf(cid_s,sizeof(cid_s),"%d",(int)cid->valuedouble);
+    snprintf(pid_s,sizeof(pid_s),"%d",(int)pid->valuedouble);
+    snprintf(qtd_s,sizeof(qtd_s),"%d",(int)qtd->valuedouble);
+    cJSON *val=cJSON_GetObjectItem(j,"valor");
+    if (val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
     const char *destino=cJSON_GetStringValue(cJSON_GetObjectItem(j,"destino"));
     const char *data=cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
     const char *status_v=cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
     const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
+    cJSON_Delete(j);
     /* Transação: inserir pedido + decrementar estoque */
     PQexec(conn,"BEGIN");
-
-    const char *ph[]={cid_s,"0",destino,data,status_v?status_v:"Pendente",obs};
+    const char *p[]={cid_s,pid_s,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
     PGresult *r = PQexecParams(conn,
         "INSERT INTO pedidos(cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs)"
         " VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
         " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
         8,NULL,p,NULL,NULL,0);
-
-    cJSON_Delete(j);
-
     if (PQresultStatus(r) != PGRES_TUPLES_OK) { PQexec(conn,"ROLLBACK"); return db_err(conn,r); }
     /* Decrementar estoque apenas se não for Cancelado */
     if (!status_v || strcmp(status_v,"Cancelado")!=0) {
@@ -583,18 +581,8 @@ static DbResult pg_save_pedido(dp_db_t db, const char *body) {
         if (PQresultStatus(eu) != PGRES_COMMAND_OK) { PQclear(eu); PQclear(r); PQexec(conn,"ROLLBACK"); PGresult *tmp=PQexec(conn,"ROLLBACK"); PQclear(tmp); DbResult er={NULL,strdup("Falha ao atualizar estoque.")}; return er; }
         PQclear(eu);
     }
-    cJSON_Delete(j);
-
-    char vtotal_s[32]; snprintf(vtotal_s,sizeof(vtotal_s),"%.2f",valor_total);
-    const char *up[]={vtotal_s,ped_id_s};
-    PGresult *ur = PQexecParams(conn,
-        "UPDATE pedidos SET valor=$1::numeric WHERE id=$2"
-        " RETURNING id,cliente_id,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
-        2,NULL,up,NULL,NULL,0);
-    if (PQresultStatus(ur)!=PGRES_TUPLES_OK) { PQexec(conn,"ROLLBACK"); return db_err(conn,ur); }
-
     PQexec(conn,"COMMIT");
-    return ok_pedido_com_itens(conn, ur);
+    return ok_item(r);
 }
 
 static DbResult pg_update_pedido(dp_db_t db, int id, const char *body) {
@@ -606,18 +594,17 @@ static DbResult pg_update_pedido(dp_db_t db, int id, const char *body) {
     const char *data=cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
     const char *status_v=cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
     const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
-    char valor_s[32]="0";
+    char qtd_s[16]="0",valor_s[32]="0";
+    cJSON *qtd=cJSON_GetObjectItem(j,"qtd"); if(qtd) snprintf(qtd_s,sizeof(qtd_s),"%d",(int)qtd->valuedouble);
     cJSON *val=cJSON_GetObjectItem(j,"valor"); if(val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
+    cJSON_Delete(j);
     const char *p[]={sid,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
     PGresult *r = PQexecParams(conn,
         "UPDATE pedidos SET qtd=$2,valor=$3,destino=$4,data_entrega=$5,status=$6,obs=$7,atualizado_em=NOW() WHERE id=$1"
         " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
         7,NULL,p,NULL,NULL,0);
-
-    cJSON_Delete(j);
-
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
-    return ok_pedido_com_itens(conn, r);
+    return ok_item(r);
 }
 
 static DbResult pg_update_pedido_status(dp_db_t db, int id, const char *status) {
