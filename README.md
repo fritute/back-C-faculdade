@@ -188,6 +188,7 @@ Base URL: `http://localhost:8000/api/v1`
 | `PATCH`  | `/produtos/:id`                | Atualizar produto parcialmente   |
 | `DELETE` | `/produtos/:id`                | Excluir produto                  |
 | `GET`    | `/produtos/estoque-baixo`      | Listar produtos com estoque baixo|
+| `POST`   | `/produtos/:id/imagem`         | Upload de imagem do produto      |
 
 **Criar produto** (`POST /produtos`):
 ```json
@@ -339,13 +340,26 @@ Parâmetro `?dias=`: `7`, `14` ou `30` (padrão: `7`).
 
 ### Autenticação (`/auth`)
 
-| Método | Endpoint         | Descrição                          |
-|--------|------------------|------------------------------------|
-| `POST` | `/auth/login`    | Autenticar usuário                 |
-| `POST` | `/auth/logout`   | Encerrar sessão                    |
-| `GET`  | `/auth/me`       | Dados do usuário autenticado       |
-| `PUT`  | `/auth/perfil`   | Atualizar nome e e-mail            |
-| `PUT`  | `/auth/senha`    | Alterar senha                      |
+| Método | Endpoint                     | Descrição                                     |
+|--------|------------------------------|-----------------------------------------------|
+| `POST` | `/auth/register`             | Registrar novo usuário (admin/operador)        |
+| `POST` | `/auth/register-cliente`     | Registrar usuário tipo cliente (retorna token) |
+| `POST` | `/auth/register-fornecedor`  | Registrar usuário tipo fornecedor (retorna token) |
+| `POST` | `/auth/login`                | Autenticar usuário                             |
+| `POST` | `/auth/logout`               | Encerrar sessão                                |
+| `GET`  | `/auth/me`                   | Dados do usuário autenticado                   |
+| `PUT`  | `/auth/perfil`               | Atualizar nome e e-mail                        |
+| `PUT`  | `/auth/senha`                | Alterar senha                                  |
+
+**Registrar** (`POST /auth/register`, `POST /auth/register-cliente`, `POST /auth/register-fornecedor`):
+```json
+{
+  "nome": "Fulano de Tal",
+  "email": "fulano@exemplo.com",
+  "senha": "minha_senha"
+}
+```
+> `register-cliente` e `register-fornecedor` retornam token de sessão automaticamente (auto-login).
 
 **Login** (`POST /auth/login`):
 ```json
@@ -366,6 +380,51 @@ Authorization: Bearer <token>
 ```json
 { "senha_atual": "senha_atual", "nova_senha": "nova_senha" }
 ```
+
+---
+
+### Meus Pedidos — Área do Cliente (`/meus-pedidos`)
+
+> Requer autenticação. Retorna apenas pedidos vinculados ao usuário autenticado.
+
+| Método | Endpoint                      | Descrição                                 |
+|--------|-------------------------------|-------------------------------------------|
+| `GET`  | `/meus-pedidos`               | Listar todos os meus pedidos              |
+| `GET`  | `/meus-pedidos/:id`           | Buscar meu pedido por ID                  |
+| `GET`  | `/meus-pedidos/:id/status`    | Consultar status de um pedido específico  |
+
+---
+
+### Relatórios (`/relatorios`)
+
+> Todos os endpoints aceitam os query params: `?inicio=YYYY-MM-DD&fim=YYYY-MM-DD&limite=N&fornecedor_id=N`
+
+| Método | Endpoint                        | Descrição                                    |
+|--------|---------------------------------|----------------------------------------------|
+| `GET`  | `/relatorios/vendas`            | Relatório geral de vendas por período        |
+| `GET`  | `/relatorios/vendas/produtos`   | Vendas agrupadas por produto (top N)         |
+| `GET`  | `/relatorios/vendas/clientes`   | Vendas agrupadas por cliente (top N)         |
+| `GET`  | `/relatorios/estoque`           | Situação atual do estoque                    |
+| `GET`  | `/relatorios/financeiro`        | Resumo financeiro (receita, ticket médio...) |
+
+**Exemplo** (`GET /relatorios/vendas?inicio=2025-01-01&fim=2025-12-31&fornecedor_id=2`):
+```json
+{
+  "success": true,
+  "data": [
+    { "pedido_id": 1, "cliente": "João", "valor": 249.50, "data": "2025-06-01", "status": "Entregue" }
+  ]
+}
+```
+
+Parâmetros disponíveis:
+
+| Param           | Padrão       | Descrição                              |
+|-----------------|--------------|----------------------------------------|
+| `inicio`        | `2000-01-01` | Data inicial do período                |
+| `fim`           | `2099-12-31` | Data final do período                  |
+| `limite`        | `10`         | Máximo de itens retornados             |
+| `fornecedor_id` | _(todos)_    | Filtrar pelo ID do fornecedor          |
 
 ---
 
@@ -428,8 +487,4 @@ Um usuário admin foi inserido no banco para testes:
 
 O servidor iniciará em `http://localhost:8000`.
 
-## Endpoints Implementados (Status Atual)
 
-- `GET /api/v1/produtos`: Retorna uma lista de exemplo (Mock).
-- Outros endpoints estão com stubs e prontos para implementação da lógica de banco de dados.
-#
