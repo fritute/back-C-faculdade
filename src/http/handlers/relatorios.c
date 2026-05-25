@@ -21,11 +21,11 @@
         } \
     } while(0)
 
-/* Helper: extrai query params inicio, fim e limite da URI */
+/* Helper: extrai query params inicio, fim, limite e fornecedor_id da URI */
 static void parse_relatorio_params(struct mg_http_message *hm,
                                     char *inicio, size_t isz,
                                     char *fim, size_t fsz,
-                                    int *limite) {
+                                    int *limite, int *fornecedor_id) {
     struct mg_str q = hm->query;
     char buf[64];
 
@@ -37,33 +37,37 @@ static void parse_relatorio_params(struct mg_http_message *hm,
 
     if (mg_http_get_var(&q, "limite", buf, sizeof(buf)) > 0) *limite = atoi(buf);
     else *limite = 10;
+
+    if (mg_http_get_var(&q, "fornecedor_id", buf, sizeof(buf)) > 0) *fornecedor_id = atoi(buf);
+    else *fornecedor_id = -1;
 }
 
 void handle_get_relatorio_vendas(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
-    char inicio[32], fim[32]; int limite;
-    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite);
-    SEND_RESULT(REPO->relatorio_vendas(db, inicio, fim), 200);
+    char inicio[32], fim[32]; int limite, fid;
+    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite, &fid);
+    SEND_RESULT(REPO->relatorio_vendas(db, inicio, fim, fid), 200);
 }
 
 void handle_get_relatorio_vendas_produto(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
-    char inicio[32], fim[32]; int limite;
-    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite);
-    SEND_RESULT(REPO->relatorio_vendas_por_produto(db, inicio, fim, limite), 200);
+    char inicio[32], fim[32]; int limite, fid;
+    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite, &fid);
+    SEND_RESULT(REPO->relatorio_vendas_por_produto(db, inicio, fim, limite, fid), 200);
 }
 
 void handle_get_relatorio_vendas_cliente(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
-    char inicio[32], fim[32]; int limite;
-    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite);
-    SEND_RESULT(REPO->relatorio_vendas_por_cliente(db, inicio, fim, limite), 200);
+    char inicio[32], fim[32]; int limite, fid;
+    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite, &fid);
+    SEND_RESULT(REPO->relatorio_vendas_por_cliente(db, inicio, fim, limite, fid), 200);
 }
 
 void handle_get_relatorio_estoque(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
-    (void)hm;
-    SEND_RESULT(REPO->relatorio_estoque(db), 200);
+    char inicio[32], fim[32]; int limite, fid;
+    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite, &fid);
+    SEND_RESULT(REPO->relatorio_estoque(db, fid), 200);
 }
 
 void handle_get_relatorio_financeiro(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
-    char inicio[32], fim[32]; int limite;
-    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite);
-    SEND_RESULT(REPO->relatorio_financeiro(db, inicio, fim), 200);
+    char inicio[32], fim[32]; int limite, fid;
+    parse_relatorio_params(hm, inicio, sizeof(inicio), fim, sizeof(fim), &limite, &fid);
+    SEND_RESULT(REPO->relatorio_financeiro(db, inicio, fim, fid), 200);
 }

@@ -115,6 +115,11 @@ void handle_post_register(struct mg_connection *c, struct mg_http_message *hm, d
     cJSON_AddNumberToObject(d, "userId", user_id);
     cJSON_AddStringToObject(d, "nome", u_nome ? u_nome : "");
     cJSON_AddStringToObject(d, "role", u_role ? u_role : "operador");
+    cJSON *fid_item = cJSON_GetObjectItem(data, "fornecedor_id");
+    if (fid_item && !cJSON_IsNull(fid_item))
+        cJSON_AddNumberToObject(d, "fornecedor_id", cJSON_GetNumberValue(fid_item));
+    else
+        cJSON_AddNullToObject(d, "fornecedor_id");
     char *out = cJSON_PrintUnformatted(resp);
     send_json(c, 201, out);
     free(out);
@@ -173,6 +178,11 @@ void handle_post_login(struct mg_connection *c, struct mg_http_message *hm, dp_d
     cJSON_AddNumberToObject(d, "userId", user_id);
     cJSON_AddStringToObject(d, "nome", nome ? nome : "");
     cJSON_AddStringToObject(d, "role", role ? role : "operador");
+    cJSON *fid_login = cJSON_GetObjectItem(data, "fornecedor_id");
+    if (fid_login && !cJSON_IsNull(fid_login))
+        cJSON_AddNumberToObject(d, "fornecedor_id", cJSON_GetNumberValue(fid_login));
+    else
+        cJSON_AddNullToObject(d, "fornecedor_id");
     char *out = cJSON_PrintUnformatted(resp);
     send_json(c, 200, out);
     free(out);

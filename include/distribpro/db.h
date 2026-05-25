@@ -15,7 +15,7 @@ typedef void* dp_db_t;
 
 typedef struct {
     /* ---- Produtos ---- */
-    DbResult (*get_produtos)(dp_db_t db);
+    DbResult (*get_produtos)(dp_db_t db, int fornecedor_id); /* -1 = todos */
     DbResult (*get_produto_by_id)(dp_db_t db, int id);
     DbResult (*save_produto)(dp_db_t db, const char *body);
     DbResult (*update_produto)(dp_db_t db, int id, const char *body);
@@ -68,11 +68,11 @@ typedef struct {
     DbResult (*get_config)(dp_db_t db);
     DbResult (*update_config)(dp_db_t db, const char *body);
     /* ---- Relatórios ---- */
-    DbResult (*relatorio_vendas)(dp_db_t db, const char *inicio, const char *fim);
-    DbResult (*relatorio_vendas_por_produto)(dp_db_t db, const char *inicio, const char *fim, int limite);
-    DbResult (*relatorio_vendas_por_cliente)(dp_db_t db, const char *inicio, const char *fim, int limite);
-    DbResult (*relatorio_estoque)(dp_db_t db);
-    DbResult (*relatorio_financeiro)(dp_db_t db, const char *inicio, const char *fim);
+    DbResult (*relatorio_vendas)(dp_db_t db, const char *inicio, const char *fim, int fornecedor_id);
+    DbResult (*relatorio_vendas_por_produto)(dp_db_t db, const char *inicio, const char *fim, int limite, int fornecedor_id);
+    DbResult (*relatorio_vendas_por_cliente)(dp_db_t db, const char *inicio, const char *fim, int limite, int fornecedor_id);
+    DbResult (*relatorio_estoque)(dp_db_t db, int fornecedor_id);
+    DbResult (*relatorio_financeiro)(dp_db_t db, const char *inicio, const char *fim, int fornecedor_id);
 } Repository;
 
 Repository* get_repository(const char *conn_str);

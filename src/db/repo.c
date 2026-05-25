@@ -1,4 +1,4 @@
-#include "distribpro/db.h"
+﻿#include "distribpro/db.h"
 #include "distribpro/repo.h"
 #include "cJSON.h"
 #include <string.h>
@@ -8,9 +8,9 @@
 
 static Repository *s_current_repo = NULL;
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    Helpers internos
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 /* Converte PGresult para array cJSON (transfere ownership do PGresult) */
 static cJSON *pg_to_array(PGresult *res) {
@@ -109,15 +109,30 @@ static PGresult *pg_exec_lit(PGconn *conn, const char *fmt, const char * const v
     return PQexec(conn, buf);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PRODUTOS
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-static DbResult pg_get_produtos(dp_db_t db) {
+static DbResult pg_get_produtos(dp_db_t db, int fornecedor_id) {
     PG_CONN
-    PGresult *r = PQexec(conn, "SELECT id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
-                               "fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em "
-                               "FROM produtos ORDER BY id");
+    static const char *cols =
+        "id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
+        "fornecedor_id,COALESCE(taxa_fornecedor,90) AS taxa_fornecedor,"
+        "COALESCE(taxa_operador,10) AS taxa_operador,"
+        "status,descricao,img_produtos,criado_em,atualizado_em";
+    if (fornecedor_id > 0) {
+        char fid_s[16]; snprintf(fid_s, sizeof(fid_s), "%d", fornecedor_id);
+        const char *p[] = { fid_s };
+        char sql[512];
+        snprintf(sql, sizeof(sql),
+            "SELECT %s FROM produtos WHERE fornecedor_id=$1 ORDER BY id", cols);
+        PGresult *r = PQexecParams(conn, sql, 1, NULL, p, NULL, NULL, 0);
+        if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
+        return ok_list(r);
+    }
+    char sql[512];
+    snprintf(sql, sizeof(sql), "SELECT %s FROM produtos ORDER BY id", cols);
+    PGresult *r = PQexec(conn, sql);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_list(r);
 }
@@ -128,7 +143,9 @@ static DbResult pg_get_produto_by_id(dp_db_t db, int id) {
     const char *p[] = { sid };
     PGresult *r = pg_exec_lit(conn,
         "SELECT id,nome,categoria,unidade,preco,estoque,estoque_min,sku,"
-        "fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em "
+        "fornecedor_id,COALESCE(taxa_fornecedor,90) AS taxa_fornecedor,"
+        "COALESCE(taxa_operador,10) AS taxa_operador,"
+        "status,descricao,img_produtos,criado_em,atualizado_em "
         "FROM produtos WHERE id=?", p, 1);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
@@ -143,6 +160,7 @@ static DbResult pg_save_produto(dp_db_t db, const char *body) {
     if (!nome || !categoria) { cJSON_Delete(j); DbResult r={NULL,strdup("nome e categoria sao obrigatorios.")}; return r; }
     char nome_s[256]="", cat_s[256]="", uni_s[64]="Un", preco_s[32]="0";
     char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="", img_s[512]="";
+    char tf_s[16]="90", to_s[16]="10";
     snprintf(nome_s, sizeof(nome_s), "%s", nome);
     snprintf(cat_s, sizeof(cat_s), "%s", categoria);
     const char *unidade  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
@@ -165,15 +183,21 @@ static DbResult pg_save_produto(dp_db_t db, const char *body) {
     cJSON *fid = cJSON_GetObjectItem(j,"fornecedor_id");
     const char *fid_p = NULL;
     if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
+    cJSON *tf = cJSON_GetObjectItem(j,"taxa_fornecedor");
+    if (tf && !cJSON_IsNull(tf)) snprintf(tf_s,sizeof(tf_s),"%.2f",tf->valuedouble);
+    cJSON *to = cJSON_GetObjectItem(j,"taxa_operador");
+    if (to && !cJSON_IsNull(to)) snprintf(to_s,sizeof(to_s),"%.2f",to->valuedouble);
     cJSON_Delete(j);
     const char *p[] = { nome_s, cat_s, uni_s, preco_s, estoque_s, emin_s,
                         sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL,
-                        img_s[0]?img_s:NULL };
+                        img_s[0]?img_s:NULL, tf_s, to_s };
     PGresult *r = pg_exec_lit(conn,
-        "INSERT INTO produtos(nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos)"
-        " VALUES(?,?,?,?::numeric,?::int,?::int,?,?::int,?,?,?)"
-        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em",
-        p, 11);
+        "INSERT INTO produtos(nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos,taxa_fornecedor,taxa_operador)"
+        " VALUES(?,?,?,?::numeric,?::int,?::int,?,?::int,?,?,?,?::numeric,?::numeric)"
+        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,"
+        "COALESCE(taxa_fornecedor,90) AS taxa_fornecedor,COALESCE(taxa_operador,10) AS taxa_operador,"
+        "status,descricao,img_produtos,criado_em,atualizado_em",
+        p, 13);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -185,6 +209,7 @@ static DbResult pg_update_produto(dp_db_t db, int id, const char *body) {
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     char nome_s[256]="", cat_s[256]="", uni_s[64]="Un", preco_s[32]="0";
     char estoque_s[16]="0", emin_s[16]="10", fid_s[16]="", sku_s[128]="", status_s[64]="Ativo", desc_s[512]="", img_s[512]="";
+    char tf_s[16]="90", to_s[16]="10";
     const char *nome      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"nome"));
     const char *categoria = cJSON_GetStringValue(cJSON_GetObjectItem(j,"categoria"));
     const char *unidade   = cJSON_GetStringValue(cJSON_GetObjectItem(j,"unidade"));
@@ -209,15 +234,22 @@ static DbResult pg_update_produto(dp_db_t db, int id, const char *body) {
     cJSON *fid = cJSON_GetObjectItem(j,"fornecedor_id");
     const char *fid_p = NULL;
     if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
+    cJSON *tf = cJSON_GetObjectItem(j,"taxa_fornecedor");
+    if (tf && !cJSON_IsNull(tf)) snprintf(tf_s,sizeof(tf_s),"%.2f",tf->valuedouble);
+    cJSON *to = cJSON_GetObjectItem(j,"taxa_operador");
+    if (to && !cJSON_IsNull(to)) snprintf(to_s,sizeof(to_s),"%.2f",to->valuedouble);
     cJSON_Delete(j);
     const char *p[] = { nome_s, cat_s, uni_s, preco_s, estoque_s, emin_s,
                         sku_s[0]?sku_s:NULL, fid_p, status_s, desc_s[0]?desc_s:NULL,
-                        img_s[0]?img_s:NULL, sid };
+                        img_s[0]?img_s:NULL, tf_s, to_s, sid };
     PGresult *r = pg_exec_lit(conn,
         "UPDATE produtos SET nome=?,categoria=?,unidade=?,preco=?::numeric,estoque=?::int,estoque_min=?::int,"
-        "sku=?,fornecedor_id=?::int,status=?,descricao=?,img_produtos=?,atualizado_em=NOW() WHERE id=?::int"
-        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,status,descricao,img_produtos,criado_em,atualizado_em",
-        p, 12);
+        "sku=?,fornecedor_id=?::int,status=?,descricao=?,img_produtos=?,"
+        "taxa_fornecedor=?::numeric,taxa_operador=?::numeric,atualizado_em=NOW() WHERE id=?::int"
+        " RETURNING id,nome,categoria,unidade,preco,estoque,estoque_min,sku,fornecedor_id,"
+        "COALESCE(taxa_fornecedor,90) AS taxa_fornecedor,COALESCE(taxa_operador,10) AS taxa_operador,"
+        "status,descricao,img_produtos,criado_em,atualizado_em",
+        p, 14);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -252,9 +284,9 @@ static DbResult pg_get_estoque_baixo(dp_db_t db) {
     return ok_list(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    CLIENTES
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static DbResult pg_get_clientes(dp_db_t db) {
     PG_CONN
@@ -354,9 +386,9 @@ static DbResult pg_delete_cliente(dp_db_t db, int id) {
     return ok_deleted(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    FORNECEDORES
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static DbResult pg_get_fornecedores(dp_db_t db) {
     PG_CONN
@@ -452,9 +484,9 @@ static DbResult pg_delete_fornecedor(dp_db_t db, int id) {
     return ok_deleted(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PEDIDOS (com itens_pedido)
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 /* Helper: busca itens de um pedido e retorna cJSON array */
 static cJSON *fetch_itens_pedido(PGconn *conn, const char *pedido_id) {
@@ -524,9 +556,15 @@ static DbResult pg_get_pedidos(dp_db_t db) {
     PG_CONN
     PGresult *r = PQexec(conn,
         "SELECT p.id,p.cliente_id,c.nome AS cliente_nome,"
-        "p.valor,p.destino,p.data_entrega,p.status,p.obs,p.criado_em,p.atualizado_em "
+        "p.fornecedor_id,f.nome AS fornecedor_nome,"
+        "p.valor,COALESCE(p.taxa_fornecedor,90) AS taxa_fornecedor,"
+        "COALESCE(p.taxa_operador,10) AS taxa_operador,"
+        "p.destino,p.data_entrega,p.status,"
+        "COALESCE(p.status_pagamento,'Pendente') AS status_pagamento,"
+        "p.obs,p.criado_em,p.atualizado_em "
         "FROM pedidos p "
         "LEFT JOIN clientes c ON c.id=p.cliente_id "
+        "LEFT JOIN fornecedores f ON f.id=p.fornecedor_id "
         "ORDER BY p.id DESC");
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_pedidos_com_itens(conn, r);
@@ -538,9 +576,15 @@ static DbResult pg_get_pedido_by_id(dp_db_t db, int id) {
     const char *p[]={sid};
     PGresult *r = PQexecParams(conn,
         "SELECT p.id,p.cliente_id,c.nome AS cliente_nome,"
-        "p.valor,p.destino,p.data_entrega,p.status,p.obs,p.criado_em,p.atualizado_em "
+        "p.fornecedor_id,f.nome AS fornecedor_nome,"
+        "p.valor,COALESCE(p.taxa_fornecedor,90) AS taxa_fornecedor,"
+        "COALESCE(p.taxa_operador,10) AS taxa_operador,"
+        "p.destino,p.data_entrega,p.status,"
+        "COALESCE(p.status_pagamento,'Pendente') AS status_pagamento,"
+        "p.obs,p.criado_em,p.atualizado_em "
         "FROM pedidos p "
         "LEFT JOIN clientes c ON c.id=p.cliente_id "
+        "LEFT JOIN fornecedores f ON f.id=p.fornecedor_id "
         "WHERE p.id=$1",1,NULL,p,NULL,NULL,0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_pedido_com_itens(conn, r);
@@ -550,39 +594,145 @@ static DbResult pg_save_pedido(dp_db_t db, const char *body) {
     PG_CONN
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON invalido.")}; return r; }
-    cJSON *cid=cJSON_GetObjectItem(j,"clienteId"); if(!cid) cid=cJSON_GetObjectItem(j,"cliente_id");
-    cJSON *pid=cJSON_GetObjectItem(j,"produtoId");  if(!pid) pid=cJSON_GetObjectItem(j,"produto_id");
-    cJSON *qtd=cJSON_GetObjectItem(j,"qtd");
-    if (!cid||!pid||!qtd) { cJSON_Delete(j); DbResult r={NULL,strdup("clienteId, produtoId e qtd sao obrigatorios.")}; return r; }
-    char cid_s[16],pid_s[16],qtd_s[16],valor_s[32]="0";
-    snprintf(cid_s,sizeof(cid_s),"%d",(int)cid->valuedouble);
-    snprintf(pid_s,sizeof(pid_s),"%d",(int)pid->valuedouble);
-    snprintf(qtd_s,sizeof(qtd_s),"%d",(int)qtd->valuedouble);
-    cJSON *val=cJSON_GetObjectItem(j,"valor");
+
+    /* cliente_id */
+    cJSON *cid = cJSON_GetObjectItem(j,"cliente_id");
+    if (!cid) cid = cJSON_GetObjectItem(j,"clienteId");
+    if (!cid) { cJSON_Delete(j); DbResult r={NULL,strdup("cliente_id e obrigatorio.")}; return r; }
+    char cid_s[16]; snprintf(cid_s,sizeof(cid_s),"%d",(int)cid->valuedouble);
+
+    /* fornecedor_id */
+    char fid_s[16]=""; const char *fid_p = NULL;
+    cJSON *fid = cJSON_GetObjectItem(j,"fornecedor_id");
+    if (fid && !cJSON_IsNull(fid)) { snprintf(fid_s,sizeof(fid_s),"%d",(int)fid->valuedouble); fid_p=fid_s; }
+
+    /* valor_total (aceita valor_total, valorTotal ou valor) */
+    char valor_s[32]="0";
+    cJSON *val = cJSON_GetObjectItem(j,"valor_total");
+    if (!val) val = cJSON_GetObjectItem(j,"valorTotal");
+    if (!val) val = cJSON_GetObjectItem(j,"valor");
     if (val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
-    const char *destino=cJSON_GetStringValue(cJSON_GetObjectItem(j,"destino"));
-    const char *data=cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
-    const char *status_v=cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
-    cJSON_Delete(j);
-    /* Transação: inserir pedido + decrementar estoque */
-    PQexec(conn,"BEGIN");
-    const char *p[]={cid_s,pid_s,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
-    PGresult *r = PQexecParams(conn,
-        "INSERT INTO pedidos(cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs)"
-        " VALUES($1,$2,$3,$4,$5,$6,$7,$8)"
-        " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
-        8,NULL,p,NULL,NULL,0);
-    if (PQresultStatus(r) != PGRES_TUPLES_OK) { PQexec(conn,"ROLLBACK"); return db_err(conn,r); }
-    /* Decrementar estoque apenas se não for Cancelado */
-    if (!status_v || strcmp(status_v,"Cancelado")!=0) {
-        const char *ep[]={qtd_s,pid_s};
-        PGresult *eu = PQexecParams(conn,"UPDATE produtos SET estoque=estoque-$1::int WHERE id=$2",2,NULL,ep,NULL,NULL,0);
-        if (PQresultStatus(eu) != PGRES_COMMAND_OK) { PQclear(eu); PQclear(r); PQexec(conn,"ROLLBACK"); PGresult *tmp=PQexec(conn,"ROLLBACK"); PQclear(tmp); DbResult er={NULL,strdup("Falha ao atualizar estoque.")}; return er; }
-        PQclear(eu);
+
+    /* outros campos do cabeÃ§alho */
+    const char *destino  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"destino"));
+    const char *data     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"data_entrega"));
+    if (!data) data      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
+    const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
+    if (!status_v) status_v = "Pendente";
+    const char *obs      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"observacoes"));
+    if (!obs) obs        = cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
+    const char *sp       = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status_pagamento"));
+    if (!sp) sp          = "Pendente";
+
+    /* taxas: lÃª do cabeÃ§alho ou do primeiro item de taxas_aplicadas */
+    char tf_s[16]="90", to_s[16]="10";
+    cJSON *tf_top = cJSON_GetObjectItem(j,"taxa_fornecedor");
+    cJSON *to_top = cJSON_GetObjectItem(j,"taxa_operador");
+    if (tf_top && !cJSON_IsNull(tf_top)) snprintf(tf_s,sizeof(tf_s),"%.2f",tf_top->valuedouble);
+    if (to_top && !cJSON_IsNull(to_top)) snprintf(to_s,sizeof(to_s),"%.2f",to_top->valuedouble);
+    cJSON *taxas_arr = cJSON_GetObjectItem(j,"taxas_aplicadas");
+    if (taxas_arr && cJSON_IsArray(taxas_arr) && cJSON_GetArraySize(taxas_arr) > 0) {
+        cJSON *first = cJSON_GetArrayItem(taxas_arr, 0);
+        cJSON *tf2 = cJSON_GetObjectItem(first,"taxa_fornecedor");
+        cJSON *to2 = cJSON_GetObjectItem(first,"taxa_operador");
+        if (tf2 && !cJSON_IsNull(tf2)) snprintf(tf_s,sizeof(tf_s),"%.2f",tf2->valuedouble);
+        if (to2 && !cJSON_IsNull(to2)) snprintf(to_s,sizeof(to_s),"%.2f",to2->valuedouble);
     }
+
+    /* ComeÃ§a transaÃ§Ã£o */
+    PQexec(conn,"BEGIN");
+
+    const char *hp[] = {cid_s,fid_p,valor_s,destino,data,status_v,obs,sp,tf_s,to_s};
+    PGresult *r = PQexecParams(conn,
+        "INSERT INTO pedidos(cliente_id,fornecedor_id,valor,destino,data_entrega,status,obs,status_pagamento,taxa_fornecedor,taxa_operador)"
+        " VALUES($1,$2::int,$3::numeric,$4,$5,$6,$7,$8,$9::numeric,$10::numeric)"
+        " RETURNING id",
+        10,NULL,hp,NULL,NULL,0);
+    if (PQresultStatus(r) != PGRES_TUPLES_OK) {
+        PQexec(conn,"ROLLBACK"); cJSON_Delete(j); return db_err(conn,r);
+    }
+    int pedido_id = atoi(PQgetvalue(r,0,0));
+    char pedido_id_s[16]; snprintf(pedido_id_s,sizeof(pedido_id_s),"%d",pedido_id);
+    PQclear(r);
+
+    /* Insere itens a partir do array produtos[] */
+    cJSON *produtos_arr = cJSON_GetObjectItem(j,"produtos");
+    int inserted_items = 0;
+    if (produtos_arr && cJSON_IsArray(produtos_arr)) {
+        int np = cJSON_GetArraySize(produtos_arr);
+        for (int i = 0; i < np; i++) {
+            cJSON *item = cJSON_GetArrayItem(produtos_arr, i);
+            cJSON *pid_j = cJSON_GetObjectItem(item,"produto_id");
+            cJSON *qtd_j = cJSON_GetObjectItem(item,"quantidade");
+            if (!qtd_j) qtd_j = cJSON_GetObjectItem(item,"qtd");
+            cJSON *pu_j  = cJSON_GetObjectItem(item,"preco_unitario");
+            if (!pu_j) pu_j = cJSON_GetObjectItem(item,"preco_unit");
+            if (!pid_j || !qtd_j) continue;
+            char pid_s[16], qtd_s[16], pu_s[32], sub_s[32];
+            snprintf(pid_s,sizeof(pid_s),"%d",(int)pid_j->valuedouble);
+            int qtd_int = (int)qtd_j->valuedouble;
+            snprintf(qtd_s,sizeof(qtd_s),"%d",qtd_int);
+            double pu = pu_j ? pu_j->valuedouble : 0.0;
+            snprintf(pu_s, sizeof(pu_s),"%.2f",pu);
+            snprintf(sub_s,sizeof(sub_s),"%.2f",pu * qtd_int);
+            const char *ip[]={pedido_id_s,pid_s,qtd_s,pu_s,sub_s};
+            PGresult *ri = PQexecParams(conn,
+                "INSERT INTO itens_pedido(pedido_id,produto_id,qtd,preco_unit,subtotal)"
+                " VALUES($1,$2,$3,$4,$5)",
+                5,NULL,ip,NULL,NULL,0);
+            if (PQresultStatus(ri) != PGRES_COMMAND_OK) {
+                PQclear(ri); PQexec(conn,"ROLLBACK"); cJSON_Delete(j);
+                DbResult er={NULL,strdup("Falha ao inserir itens do pedido.")}; return er;
+            }
+            PQclear(ri);
+            /* Desconta estoque (exceto pedidos Cancelados) */
+            if (strcmp(status_v,"Cancelado") != 0) {
+                const char *ep[]={qtd_s,pid_s};
+                PGresult *eu = PQexecParams(conn,
+                    "UPDATE produtos SET estoque=estoque-$1::int WHERE id=$2",
+                    2,NULL,ep,NULL,NULL,0);
+                PQclear(eu);
+            }
+            inserted_items++;
+        }
+    }
+
+    /* Fallback: payload antigo com produto_id/qtd direto no body */
+    if (inserted_items == 0) {
+        cJSON *pid_old = cJSON_GetObjectItem(j,"produto_id");
+        if (!pid_old) pid_old = cJSON_GetObjectItem(j,"produtoId");
+        cJSON *qtd_old = cJSON_GetObjectItem(j,"qtd");
+        if (pid_old && qtd_old) {
+            char pid_s[16], qtd_s[16], pu_s[32], sub_s[32];
+            snprintf(pid_s,sizeof(pid_s),"%d",(int)pid_old->valuedouble);
+            int qtd_int = (int)qtd_old->valuedouble;
+            snprintf(qtd_s,sizeof(qtd_s),"%d",qtd_int);
+            double pu = qtd_int > 0 && val ? val->valuedouble / qtd_int : 0.0;
+            snprintf(pu_s, sizeof(pu_s),"%.2f",pu);
+            snprintf(sub_s,sizeof(sub_s),"%.2f",val ? val->valuedouble : 0.0);
+            const char *ip[]={pedido_id_s,pid_s,qtd_s,pu_s,sub_s};
+            PGresult *ri = PQexecParams(conn,
+                "INSERT INTO itens_pedido(pedido_id,produto_id,qtd,preco_unit,subtotal)"
+                " VALUES($1,$2,$3,$4,$5)",
+                5,NULL,ip,NULL,NULL,0);
+            if (PQresultStatus(ri) != PGRES_COMMAND_OK) {
+                PQclear(ri); PQexec(conn,"ROLLBACK"); cJSON_Delete(j);
+                DbResult er={NULL,strdup("Falha ao inserir item do pedido.")}; return er;
+            }
+            PQclear(ri);
+            if (strcmp(status_v,"Cancelado") != 0) {
+                const char *ep[]={qtd_s,pid_s};
+                PGresult *eu = PQexecParams(conn,
+                    "UPDATE produtos SET estoque=estoque-$1::int WHERE id=$2",
+                    2,NULL,ep,NULL,NULL,0);
+                PQclear(eu);
+            }
+        }
+    }
+
+    cJSON_Delete(j);
     PQexec(conn,"COMMIT");
-    return ok_item(r);
+    return pg_get_pedido_by_id(db, pedido_id);
 }
 
 static DbResult pg_update_pedido(dp_db_t db, int id, const char *body) {
@@ -590,21 +740,32 @@ static DbResult pg_update_pedido(dp_db_t db, int id, const char *body) {
     cJSON *j = cJSON_Parse(body);
     if (!j) { DbResult r={NULL,strdup("JSON invalido.")}; return r; }
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
-    const char *destino=cJSON_GetStringValue(cJSON_GetObjectItem(j,"destino"));
-    const char *data=cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
-    const char *status_v=cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
-    const char *obs=cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
-    char qtd_s[16]="0",valor_s[32]="0";
-    cJSON *qtd=cJSON_GetObjectItem(j,"qtd"); if(qtd) snprintf(qtd_s,sizeof(qtd_s),"%d",(int)qtd->valuedouble);
-    cJSON *val=cJSON_GetObjectItem(j,"valor"); if(val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
+    const char *destino  = cJSON_GetStringValue(cJSON_GetObjectItem(j,"destino"));
+    const char *data     = cJSON_GetStringValue(cJSON_GetObjectItem(j,"data_entrega"));
+    if (!data) data      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"data"));
+    const char *status_v = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status"));
+    const char *obs      = cJSON_GetStringValue(cJSON_GetObjectItem(j,"obs"));
+    const char *sp       = cJSON_GetStringValue(cJSON_GetObjectItem(j,"status_pagamento"));
+    char valor_s[32]="0", tf_s[16]="90", to_s[16]="10";
+    cJSON *val = cJSON_GetObjectItem(j,"valor");
+    if (!val) val = cJSON_GetObjectItem(j,"valor_total");
+    if (val) snprintf(valor_s,sizeof(valor_s),"%.2f",val->valuedouble);
+    cJSON *tf = cJSON_GetObjectItem(j,"taxa_fornecedor");
+    if (tf && !cJSON_IsNull(tf)) snprintf(tf_s,sizeof(tf_s),"%.2f",tf->valuedouble);
+    cJSON *to = cJSON_GetObjectItem(j,"taxa_operador");
+    if (to && !cJSON_IsNull(to)) snprintf(to_s,sizeof(to_s),"%.2f",to->valuedouble);
     cJSON_Delete(j);
-    const char *p[]={sid,qtd_s,valor_s,destino,data,status_v?status_v:"Pendente",obs};
+    const char *p[]={sid,valor_s,destino,data,status_v?status_v:"Pendente",obs,sp?sp:"Pendente",tf_s,to_s};
     PGresult *r = PQexecParams(conn,
-        "UPDATE pedidos SET qtd=$2,valor=$3,destino=$4,data_entrega=$5,status=$6,obs=$7,atualizado_em=NOW() WHERE id=$1"
-        " RETURNING id,cliente_id,produto_id,qtd,valor,destino,data_entrega,status,obs,criado_em,atualizado_em",
-        7,NULL,p,NULL,NULL,0);
-    if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
-    return ok_item(r);
+        "UPDATE pedidos SET valor=$2::numeric,destino=$3,data_entrega=$4,status=$5,obs=$6,"
+        "status_pagamento=$7,taxa_fornecedor=$8::numeric,taxa_operador=$9::numeric,"
+        "atualizado_em=NOW() WHERE id=$1"
+        " RETURNING id",
+        9,NULL,p,NULL,NULL,0);
+    if (PQresultStatus(r) != PGRES_TUPLES_OK) { PQclear(r); return db_err(conn, r); }
+    int updated_id = atoi(PQgetvalue(r,0,0));
+    PQclear(r);
+    return pg_get_pedido_by_id(db, updated_id);
 }
 
 static DbResult pg_update_pedido_status(dp_db_t db, int id, const char *status) {
@@ -658,10 +819,6 @@ static DbResult pg_get_pedidos_recentes(dp_db_t db) {
     return ok_pedidos_com_itens(conn, r);
 }
 
-/* ═══════════════════════════════════════════════════════════
-   MEUS PEDIDOS (area do cliente)
-   ═══════════════════════════════════════════════════════════ */
-
 static DbResult pg_get_meus_pedidos(dp_db_t db, int usuario_id) {
     PG_CONN
     char uid_s[16]; snprintf(uid_s,sizeof(uid_s),"%d",usuario_id);
@@ -709,9 +866,9 @@ static DbResult pg_get_meu_pedido_status(dp_db_t db, int usuario_id, int pedido_
     return ok_item(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    DASHBOARD
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static DbResult pg_get_dashboard_kpis(dp_db_t db) {
     PG_CONN
@@ -723,6 +880,8 @@ static DbResult pg_get_dashboard_kpis(dp_db_t db) {
         "(SELECT COUNT(*) FROM pedidos WHERE status='Pendente') AS pedidos_pendentes,"
         "(SELECT COUNT(*) FROM pedidos WHERE status='Em Rota') AS pedidos_em_rota,"
         "(SELECT COALESCE(SUM(valor),0) FROM pedidos WHERE status='Entregue') AS faturamento_total,"
+        "(SELECT COALESCE(SUM(valor),0) FROM pedidos WHERE status='Entregue'"
+        " AND DATE_TRUNC('month',criado_em)=DATE_TRUNC('month',NOW())) AS faturamento_mes,"
         "(SELECT COUNT(*) FROM produtos WHERE estoque<=estoque_min) AS estoque_baixo");
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
@@ -749,9 +908,9 @@ static DbResult pg_get_dashboard_status_pedidos(dp_db_t db) {
     return ok_list(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    ESTOQUE
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static DbResult pg_get_estoque(dp_db_t db) {
     PG_CONN
@@ -774,15 +933,19 @@ static DbResult pg_ajustar_estoque(dp_db_t db, int produto_id, int qtd) {
     return ok_item(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    AUTH / USUARIOS
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static DbResult pg_get_usuario_by_email(dp_db_t db, const char *email) {
     PG_CONN
     const char *p[]={email};
     PGresult *r = PQexecParams(conn,
-        "SELECT id,nome,email,senha_hash,role,criado_em FROM usuarios WHERE email=$1",
+        "SELECT u.id,u.nome,u.email,u.senha_hash,u.role,u.criado_em,"
+        "f.id AS fornecedor_id "
+        "FROM usuarios u "
+        "LEFT JOIN fornecedores f ON f.usuario_id=u.id "
+        "WHERE u.email=$1",
         1,NULL,p,NULL,NULL,0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
@@ -793,7 +956,11 @@ static DbResult pg_get_usuario_by_id(dp_db_t db, int id) {
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[]={sid};
     PGresult *r = PQexecParams(conn,
-        "SELECT id,nome,email,role,criado_em FROM usuarios WHERE id=$1",
+        "SELECT u.id,u.nome,u.email,u.role,u.criado_em,"
+        "f.id AS fornecedor_id "
+        "FROM usuarios u "
+        "LEFT JOIN fornecedores f ON f.usuario_id=u.id "
+        "WHERE u.id=$1",
         1,NULL,p,NULL,NULL,0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
@@ -814,14 +981,68 @@ static DbResult pg_save_usuario(dp_db_t db, const char *body) {
     const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(j, "role"));
     if (!role) role = "operador";
     const char *p[] = {nome, email, senha, role};
-    PGresult *r = PQexecParams(conn,
+    PGresult *ru = PQexecParams(conn,
         "INSERT INTO usuarios(nome, email, senha_hash, role)"
         " VALUES($1, $2, $3, $4)"
         " RETURNING id, nome, email, role, criado_em, atualizado_em",
         4, NULL, p, NULL, NULL, 0);
+    if (PQresultStatus(ru) != PGRES_TUPLES_OK) { cJSON_Delete(j); return db_err(conn, ru); }
+
+    /* Captura dados do usuÃ¡rio criado */
+    int user_id = atoi(PQgetvalue(ru, 0, 0));
+    char uid_s[16]; snprintf(uid_s, sizeof(uid_s), "%d", user_id);
+    char nome_s[256]="", email_s[256]="", role_s[32]="operador";
+    snprintf(nome_s,  sizeof(nome_s),  "%s", PQgetvalue(ru, 0, 1));
+    snprintf(email_s, sizeof(email_s), "%s", PQgetvalue(ru, 0, 2));
+    snprintf(role_s,  sizeof(role_s),  "%s", PQgetvalue(ru, 0, 3));
+
+    int fornecedor_id = -1;
+
+    /* Auto-cria registro de fornecedor se role='admin' */
+    if (strcmp(role_s, "admin") == 0) {
+        const char *pf[] = {uid_s, nome_s, email_s};
+        PGresult *rf = PQexecParams(conn,
+            "INSERT INTO fornecedores(usuario_id, nome, email, status)"
+            " VALUES($1::int, $2, $3, 'Ativo')"
+            " ON CONFLICT DO NOTHING RETURNING id",
+            3, NULL, pf, NULL, NULL, 0);
+        if (PQresultStatus(rf) == PGRES_TUPLES_OK && PQntuples(rf) > 0)
+            fornecedor_id = atoi(PQgetvalue(rf, 0, 0));
+        PQclear(rf);
+    }
+
+    /* Auto-cria registro de cliente se role='cliente' */
+    if (strcmp(role_s, "cliente") == 0) {
+        const char *pc[] = {uid_s, nome_s, email_s};
+        PGresult *rc = PQexecParams(conn,
+            "INSERT INTO clientes(usuario_id, nome, email, tipo, status)"
+            " VALUES($1::int, $2, $3, 'PF', 'Ativo')"
+            " ON CONFLICT DO NOTHING",
+            3, NULL, pc, NULL, NULL, 0);
+        PQclear(rc);
+    }
+
+    /* Monta resposta JSON com fornecedor_id */
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "success", 1);
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(data, "id", user_id);
+    cJSON_AddStringToObject(data, "nome", nome_s);
+    cJSON_AddStringToObject(data, "email", email_s);
+    cJSON_AddStringToObject(data, "role", role_s);
+    if (PQntuples(ru) > 0) {
+        cJSON_AddStringToObject(data, "criado_em", PQgetvalue(ru, 0, 4));
+    }
+    if (fornecedor_id > 0)
+        cJSON_AddNumberToObject(data, "fornecedor_id", fornecedor_id);
+    else
+        cJSON_AddNullToObject(data, "fornecedor_id");
+    cJSON_AddItemToObject(root, "data", data);
+    PQclear(ru);
     cJSON_Delete(j);
-    if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
-    return ok_item(r);
+    DbResult res = { cJSON_PrintUnformatted(root), NULL };
+    cJSON_Delete(root);
+    return res;
 }
 
 static DbResult pg_save_usuario_with_role(dp_db_t db, const char *body, const char *role) {
@@ -958,9 +1179,9 @@ static DbResult pg_update_usuario_senha(dp_db_t db, int id, const char *senha_ha
     return res;
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    CONFIG EMPRESA
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static DbResult pg_get_config(dp_db_t db) {
     PG_CONN
@@ -992,31 +1213,36 @@ static DbResult pg_update_config(dp_db_t db, const char *body) {
     return ok_item(r);
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    RELATORIOS
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-static DbResult pg_relatorio_vendas(dp_db_t db, const char *inicio, const char *fim) {
+static DbResult pg_relatorio_vendas(dp_db_t db, const char *inicio, const char *fim, int fornecedor_id) {
     PG_CONN
-    const char *p[]={inicio, fim};
-    PGresult *r = PQexecParams(conn,
+    char fid_s[16]; snprintf(fid_s, sizeof(fid_s), "%d", fornecedor_id);
+    const char *p[]={inicio, fim, fid_s};
+    const char *fid_filter = fornecedor_id > 0
+        ? " AND pd.fornecedor_id=$3::int" : "";
+    char sql1[512], sql2[512];
+    snprintf(sql1, sizeof(sql1),
         "SELECT "
-        "(SELECT COUNT(*) FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date) AS total_pedidos,"
-        "(SELECT COALESCE(SUM(ip.qtd),0) FROM itens_pedido ip INNER JOIN pedidos pd ON pd.id=ip.pedido_id WHERE pd.criado_em::date BETWEEN $1::date AND $2::date) AS total_itens,"
-        "(SELECT COALESCE(SUM(valor),0) FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date) AS valor_total",
-        2,NULL,p,NULL,NULL,0);
+        "(SELECT COUNT(*) FROM pedidos pd WHERE pd.criado_em::date BETWEEN $1::date AND $2::date%s) AS total_pedidos,"
+        "(SELECT COALESCE(SUM(ip.qtd),0) FROM itens_pedido ip INNER JOIN pedidos pd ON pd.id=ip.pedido_id WHERE pd.criado_em::date BETWEEN $1::date AND $2::date%s) AS total_itens,"
+        "(SELECT COALESCE(SUM(pd.valor),0) FROM pedidos pd WHERE pd.criado_em::date BETWEEN $1::date AND $2::date%s) AS valor_total",
+        fid_filter, fid_filter, fid_filter);
+    snprintf(sql2, sizeof(sql2),
+        "SELECT status, COUNT(*) AS total, COALESCE(SUM(valor),0) AS valor "
+        "FROM pedidos pd WHERE pd.criado_em::date BETWEEN $1::date AND $2::date%s "
+        "GROUP BY status ORDER BY total DESC", fid_filter);
+    int nparams = fornecedor_id > 0 ? 3 : 2;
+    PGresult *r = PQexecParams(conn, sql1, nparams, NULL, p, NULL, NULL, 0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
 
-    /* Build response with status breakdown */
     cJSON *stats = pg_to_array(r);
     cJSON *item = cJSON_DetachItemFromArray(stats, 0);
     cJSON_Delete(stats); PQclear(r);
 
-    PGresult *r2 = PQexecParams(conn,
-        "SELECT status, COUNT(*) AS total, COALESCE(SUM(valor),0) AS valor "
-        "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date "
-        "GROUP BY status ORDER BY total DESC",
-        2,NULL,p,NULL,NULL,0);
+    PGresult *r2 = PQexecParams(conn, sql2, nparams, NULL, p, NULL, NULL, 0);
     cJSON *status_arr = (PQresultStatus(r2)==PGRES_TUPLES_OK) ? pg_to_array(r2) : cJSON_CreateArray();
     PQclear(r2);
 
@@ -1034,54 +1260,69 @@ static DbResult pg_relatorio_vendas(dp_db_t db, const char *inicio, const char *
     return res;
 }
 
-static DbResult pg_relatorio_vendas_por_produto(dp_db_t db, const char *inicio, const char *fim, int limite) {
+static DbResult pg_relatorio_vendas_por_produto(dp_db_t db, const char *inicio, const char *fim, int limite, int fornecedor_id) {
     PG_CONN
     char lim_s[16]; snprintf(lim_s,sizeof(lim_s),"%d",limite>0?limite:10);
-    const char *p[]={inicio, fim, lim_s};
-    PGresult *r = PQexecParams(conn,
+    char fid_s[16]; snprintf(fid_s,sizeof(fid_s),"%d",fornecedor_id);
+    const char *p[]={inicio, fim, lim_s, fid_s};
+    int nparams = fornecedor_id > 0 ? 4 : 3;
+    char sql[512];
+    snprintf(sql, sizeof(sql),
         "SELECT ip.produto_id, pr.nome AS produto_nome, SUM(ip.qtd) AS qtd_vendida, SUM(ip.subtotal) AS valor_total "
         "FROM itens_pedido ip "
         "INNER JOIN pedidos pd ON pd.id=ip.pedido_id "
         "INNER JOIN produtos pr ON pr.id=ip.produto_id "
-        "WHERE pd.criado_em::date BETWEEN $1::date AND $2::date "
+        "WHERE pd.criado_em::date BETWEEN $1::date AND $2::date%s "
         "GROUP BY ip.produto_id, pr.nome ORDER BY qtd_vendida DESC LIMIT $3::int",
-        3,NULL,p,NULL,NULL,0);
+        fornecedor_id > 0 ? " AND pr.fornecedor_id=$4::int" : "");
+    PGresult *r = PQexecParams(conn, sql, nparams, NULL, p, NULL, NULL, 0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_list(r);
 }
 
-static DbResult pg_relatorio_vendas_por_cliente(dp_db_t db, const char *inicio, const char *fim, int limite) {
+static DbResult pg_relatorio_vendas_por_cliente(dp_db_t db, const char *inicio, const char *fim, int limite, int fornecedor_id) {
     PG_CONN
     char lim_s[16]; snprintf(lim_s,sizeof(lim_s),"%d",limite>0?limite:10);
-    const char *p[]={inicio, fim, lim_s};
-    PGresult *r = PQexecParams(conn,
+    char fid_s[16]; snprintf(fid_s,sizeof(fid_s),"%d",fornecedor_id);
+    const char *p[]={inicio, fim, lim_s, fid_s};
+    int nparams = fornecedor_id > 0 ? 4 : 3;
+    char sql[512];
+    snprintf(sql, sizeof(sql),
         "SELECT p.cliente_id, c.nome AS cliente_nome, COUNT(p.id) AS total_pedidos, SUM(p.valor) AS valor_total "
         "FROM pedidos p "
         "INNER JOIN clientes c ON c.id=p.cliente_id "
-        "WHERE p.criado_em::date BETWEEN $1::date AND $2::date "
+        "WHERE p.criado_em::date BETWEEN $1::date AND $2::date%s "
         "GROUP BY p.cliente_id, c.nome ORDER BY valor_total DESC LIMIT $3::int",
-        3,NULL,p,NULL,NULL,0);
+        fornecedor_id > 0 ? " AND p.fornecedor_id=$4::int" : "");
+    PGresult *r = PQexecParams(conn, sql, nparams, NULL, p, NULL, NULL, 0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_list(r);
 }
 
-static DbResult pg_relatorio_estoque(dp_db_t db) {
+static DbResult pg_relatorio_estoque(dp_db_t db, int fornecedor_id) {
     PG_CONN
-    /* Summary */
-    PGresult *r1 = PQexec(conn,
+    char fid_s[16]; snprintf(fid_s,sizeof(fid_s),"%d",fornecedor_id);
+    const char *fid_filter = fornecedor_id > 0 ? " AND fornecedor_id=$1::int" : "";
+    const char *p[]={fid_s};
+    int nparams = fornecedor_id > 0 ? 1 : 0;
+    char sql1[512], sql2[512];
+    snprintf(sql1, sizeof(sql1),
         "SELECT COUNT(*) AS total_produtos, COALESCE(SUM(estoque),0) AS total_itens_estoque,"
         "COALESCE(SUM(estoque*preco),0) AS valor_total_estoque,"
-        "(SELECT COUNT(*) FROM produtos WHERE estoque<=estoque_min) AS produtos_abaixo_minimo "
-        "FROM produtos WHERE status='Ativo'");
+        "(SELECT COUNT(*) FROM produtos WHERE estoque<=estoque_min AND status='Ativo'%s) AS produtos_abaixo_minimo "
+        "FROM produtos WHERE status='Ativo'%s",
+        fid_filter, fid_filter);
+    snprintf(sql2, sizeof(sql2),
+        "SELECT id,nome,categoria,estoque,estoque_min,preco,estoque*preco AS valor_estoque,status "
+        "FROM produtos WHERE status='Ativo'%s ORDER BY nome", fid_filter);
+    PGresult *r1 = PQexecParams(conn, sql1, nparams, NULL, p, NULL, NULL, 0);
     if (PQresultStatus(r1) != PGRES_TUPLES_OK) return db_err(conn, r1);
 
     cJSON *stats = pg_to_array(r1);
     cJSON *summary = cJSON_DetachItemFromArray(stats, 0);
     cJSON_Delete(stats); PQclear(r1);
 
-    PGresult *r2 = PQexec(conn,
-        "SELECT id,nome,categoria,estoque,estoque_min,preco,estoque*preco AS valor_estoque,status "
-        "FROM produtos WHERE status='Ativo' ORDER BY nome");
+    PGresult *r2 = PQexecParams(conn, sql2, nparams, NULL, p, NULL, NULL, 0);
     if (PQresultStatus(r2) != PGRES_TUPLES_OK) { cJSON_Delete(summary); return db_err(conn, r2); }
     cJSON *lista = pg_to_array(r2); PQclear(r2);
 
@@ -1094,34 +1335,43 @@ static DbResult pg_relatorio_estoque(dp_db_t db) {
     return res;
 }
 
-static DbResult pg_relatorio_financeiro(dp_db_t db, const char *inicio, const char *fim) {
+static DbResult pg_relatorio_financeiro(dp_db_t db, const char *inicio, const char *fim, int fornecedor_id) {
     PG_CONN
-    const char *p[]={inicio, fim};
-    PGresult *r1 = PQexecParams(conn,
+    char fid_s[16]; snprintf(fid_s,sizeof(fid_s),"%d",fornecedor_id);
+    const char *fid_filter = fornecedor_id > 0 ? " AND fornecedor_id=$3::int" : "";
+    const char *p[]={inicio, fim, fid_s};
+    int nparams = fornecedor_id > 0 ? 3 : 2;
+    char sql1[512];
+    snprintf(sql1, sizeof(sql1),
         "SELECT COALESCE(SUM(valor),0) AS faturamento_total,"
-        "CASE WHEN COUNT(*)>0 THEN SUM(valor)/COUNT(*) ELSE 0 END AS ticket_medio,"
-        "COUNT(*) AS total_pedidos "
-        "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date AND status!='Cancelado'",
-        2,NULL,p,NULL,NULL,0);
+        "COALESCE(SUM(CASE WHEN status='Entregue' THEN valor ELSE 0 END),0) AS faturamento_realizado,"
+        "COALESCE(SUM(CASE WHEN status NOT IN ('Cancelado','Entregue') THEN valor ELSE 0 END),0) AS faturamento_pendente,"
+        "COUNT(*) AS total_pedidos,"
+        "COUNT(CASE WHEN status='Cancelado' THEN 1 END) AS pedidos_cancelados "
+        "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date%s", fid_filter);
+    PGresult *r1 = PQexecParams(conn, sql1, nparams, NULL, p, NULL, NULL, 0);
     if (PQresultStatus(r1) != PGRES_TUPLES_OK) return db_err(conn, r1);
 
     cJSON *stats = pg_to_array(r1);
     cJSON *summary = cJSON_DetachItemFromArray(stats, 0);
     cJSON_Delete(stats); PQclear(r1);
 
+    /* Detalhamento mensal */
+    char sql2[512];
+    snprintf(sql2, sizeof(sql2),
+        "SELECT TO_CHAR(DATE_TRUNC('month',criado_em),'YYYY-MM') AS mes,"
+        "COUNT(*) AS total_pedidos, COALESCE(SUM(valor),0) AS valor_total "
+        "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date%s "
+        "GROUP BY mes ORDER BY mes ASC", fid_filter);
+    PGresult *r2 = PQexecParams(conn, sql2, nparams, NULL, p, NULL, NULL, 0);
+    cJSON *mensal = (PQresultStatus(r2)==PGRES_TUPLES_OK) ? pg_to_array(r2) : cJSON_CreateArray();
+    PQclear(r2);
+
+    cJSON_AddItemToObject(summary, "mensal", mensal);
     cJSON *periodo = cJSON_CreateObject();
     cJSON_AddStringToObject(periodo, "inicio", inicio);
     cJSON_AddStringToObject(periodo, "fim", fim);
     cJSON_AddItemToObject(summary, "periodo", periodo);
-
-    PGresult *r2 = PQexecParams(conn,
-        "SELECT DATE(criado_em) AS dia, COUNT(*) AS total_pedidos, COALESCE(SUM(valor),0) AS valor "
-        "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date AND status!='Cancelado' "
-        "GROUP BY dia ORDER BY dia ASC",
-        2,NULL,p,NULL,NULL,0);
-    cJSON *dias = (PQresultStatus(r2)==PGRES_TUPLES_OK) ? pg_to_array(r2) : cJSON_CreateArray();
-    PQclear(r2);
-    cJSON_AddItemToObject(summary, "faturamento_por_dia", dias);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "success", 1);
@@ -1131,68 +1381,68 @@ static DbResult pg_relatorio_financeiro(dp_db_t db, const char *inicio, const ch
     return res;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Repository instances
-   ═══════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   REPOSITÃ“RIO â€” instÃ¢ncia PostgreSQL
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 static Repository s_pg_repo = {
-    .get_produtos             = pg_get_produtos,
-    .get_produto_by_id        = pg_get_produto_by_id,
-    .save_produto             = pg_save_produto,
-    .update_produto           = pg_update_produto,
-    .update_produto_imagem    = pg_update_produto_imagem,
-    .delete_produto           = pg_delete_produto,
-    .get_estoque_baixo        = pg_get_estoque_baixo,
-    .get_clientes             = pg_get_clientes,
-    .get_cliente_by_id        = pg_get_cliente_by_id,
-    .save_cliente             = pg_save_cliente,
-    .update_cliente           = pg_update_cliente,
-    .delete_cliente           = pg_delete_cliente,
-    .get_fornecedores         = pg_get_fornecedores,
-    .get_fornecedor_by_id     = pg_get_fornecedor_by_id,
-    .save_fornecedor          = pg_save_fornecedor,
-    .update_fornecedor        = pg_update_fornecedor,
-    .delete_fornecedor        = pg_delete_fornecedor,
-    .get_pedidos              = pg_get_pedidos,
-    .get_pedido_by_id         = pg_get_pedido_by_id,
-    .save_pedido              = pg_save_pedido,
-    .update_pedido            = pg_update_pedido,
-    .update_pedido_status     = pg_update_pedido_status,
-    .delete_pedido            = pg_delete_pedido,
-    .get_pedidos_recentes     = pg_get_pedidos_recentes,
-    .get_meus_pedidos         = pg_get_meus_pedidos,
-    .get_meu_pedido_by_id     = pg_get_meu_pedido_by_id,
-    .get_meu_pedido_status    = pg_get_meu_pedido_status,
-    .get_dashboard_kpis       = pg_get_dashboard_kpis,
-    .get_dashboard_entregas   = pg_get_dashboard_entregas,
+    .get_produtos                 = pg_get_produtos,
+    .get_produto_by_id            = pg_get_produto_by_id,
+    .save_produto                 = pg_save_produto,
+    .update_produto               = pg_update_produto,
+    .update_produto_imagem        = pg_update_produto_imagem,
+    .delete_produto               = pg_delete_produto,
+    .get_estoque_baixo            = pg_get_estoque_baixo,
+    .get_clientes                 = pg_get_clientes,
+    .get_cliente_by_id            = pg_get_cliente_by_id,
+    .save_cliente                 = pg_save_cliente,
+    .update_cliente               = pg_update_cliente,
+    .delete_cliente               = pg_delete_cliente,
+    .get_fornecedores             = pg_get_fornecedores,
+    .get_fornecedor_by_id         = pg_get_fornecedor_by_id,
+    .save_fornecedor              = pg_save_fornecedor,
+    .update_fornecedor            = pg_update_fornecedor,
+    .delete_fornecedor            = pg_delete_fornecedor,
+    .get_pedidos                  = pg_get_pedidos,
+    .get_pedido_by_id             = pg_get_pedido_by_id,
+    .save_pedido                  = pg_save_pedido,
+    .update_pedido                = pg_update_pedido,
+    .update_pedido_status         = pg_update_pedido_status,
+    .delete_pedido                = pg_delete_pedido,
+    .get_pedidos_recentes         = pg_get_pedidos_recentes,
+    .get_meus_pedidos             = pg_get_meus_pedidos,
+    .get_meu_pedido_by_id         = pg_get_meu_pedido_by_id,
+    .get_meu_pedido_status        = pg_get_meu_pedido_status,
+    .get_dashboard_kpis           = pg_get_dashboard_kpis,
+    .get_dashboard_entregas       = pg_get_dashboard_entregas,
     .get_dashboard_status_pedidos = pg_get_dashboard_status_pedidos,
-    .get_estoque              = pg_get_estoque,
-    .ajustar_estoque          = pg_ajustar_estoque,
-    .get_usuario_by_email     = pg_get_usuario_by_email,
-    .get_usuario_by_id        = pg_get_usuario_by_id,
-    .save_usuario             = pg_save_usuario,
-    .save_usuario_with_role   = pg_save_usuario_with_role,
-    .get_cliente_by_usuario_id = pg_get_cliente_by_usuario_id,
+    .get_estoque                  = pg_get_estoque,
+    .ajustar_estoque              = pg_ajustar_estoque,
+    .get_usuario_by_email         = pg_get_usuario_by_email,
+    .get_usuario_by_id            = pg_get_usuario_by_id,
+    .save_usuario                 = pg_save_usuario,
+    .save_usuario_with_role       = pg_save_usuario_with_role,
+    .get_cliente_by_usuario_id    = pg_get_cliente_by_usuario_id,
     .get_fornecedor_by_usuario_id = pg_get_fornecedor_by_usuario_id,
-    .save_cliente_for_user    = pg_save_cliente_for_user,
-    .save_fornecedor_for_user = pg_save_fornecedor_for_user,
-    .update_usuario_perfil    = pg_update_usuario_perfil,
-    .update_usuario_senha     = pg_update_usuario_senha,
-    .get_config               = pg_get_config,
-    .update_config            = pg_update_config,
-    .relatorio_vendas         = pg_relatorio_vendas,
+    .save_cliente_for_user        = pg_save_cliente_for_user,
+    .save_fornecedor_for_user     = pg_save_fornecedor_for_user,
+    .update_usuario_perfil        = pg_update_usuario_perfil,
+    .update_usuario_senha         = pg_update_usuario_senha,
+    .get_config                   = pg_get_config,
+    .update_config                = pg_update_config,
+    .relatorio_vendas             = pg_relatorio_vendas,
     .relatorio_vendas_por_produto = pg_relatorio_vendas_por_produto,
     .relatorio_vendas_por_cliente = pg_relatorio_vendas_por_cliente,
-    .relatorio_estoque        = pg_relatorio_estoque,
-    .relatorio_financeiro     = pg_relatorio_financeiro,
+    .relatorio_estoque            = pg_relatorio_estoque,
+    .relatorio_financeiro         = pg_relatorio_financeiro,
 };
 
 Repository* get_repository(const char *conn_str) {
-    if (conn_str && (strstr(conn_str,"postgresql://")||strstr(conn_str,"host=")))
-        s_current_repo = &s_pg_repo;
-    return s_current_repo;
+    (void)conn_str;
+    return &s_pg_repo;
 }
 
 Repository* repo_get_instance(void) {
-    return s_current_repo;
+    return &s_pg_repo;
 }
+

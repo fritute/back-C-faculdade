@@ -23,8 +23,11 @@
     } while(0)
 
 void handle_get_produtos(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {
-    (void)hm;
-    SEND_RESULT(REPO->get_produtos(db), 200);
+    char buf[32];
+    int fornecedor_id = -1;
+    if (mg_http_get_var(&hm->query, "fornecedor_id", buf, sizeof(buf)) > 0)
+        fornecedor_id = atoi(buf);
+    SEND_RESULT(REPO->get_produtos(db, fornecedor_id), 200);
 }
 
 void handle_get_produto_by_id(struct mg_connection *c, struct mg_http_message *hm, dp_db_t db) {

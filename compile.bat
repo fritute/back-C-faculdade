@@ -35,6 +35,7 @@ set SOURCES=%SRC_DIR%\main.c ^
     %SRC_DIR%\http\handlers\relatorios.c ^
     %SRC_DIR%\db\repo.c ^
     %SRC_DIR%\utils\common.c ^
+    %SRC_DIR%\utils\supabase_storage.c ^
     %LIB_DIR%\mongoose.c ^
     %LIB_DIR%\cJSON.c
 
@@ -47,7 +48,7 @@ set PG_LIB="%PG_PATH%\lib"
 set INCLUDES=-I%INC_DIR% -I%LIB_DIR% -I%PG_INCLUDE%
 
 echo [1/2] Compiling sources...
-%GCC_PATH% %SOURCES% %INCLUDES% %LIBS% -L%PG_LIB% -lpq -o %BIN_DIR%\distribpro.exe
+%GCC_PATH% %SOURCES% %INCLUDES% %LIBS% -L%PG_LIB% -lpq -lcurl -o %BIN_DIR%\distribpro.exe
 
 if %errorlevel% neq 0 (
     echo.

@@ -113,3 +113,16 @@ CREATE INDEX IF NOT EXISTS idx_fornecedores_usuario  ON fornecedores(usuario_id)
 INSERT INTO usuarios (nome, email, senha_hash, role) 
 VALUES ('Admin Master', 'admin@distribpro.com.br', '$2b$12$K3y6C.E0S.uD8M.O5u.7.e5v7O8p9qA1r2s3t4u5v6w7x8y9z0a1', 'admin')
 ON CONFLICT (email) DO NOTHING;
+
+-- Migrations v2: Marketplace
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS taxa_fornecedor NUMERIC(5,2) DEFAULT 90;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS taxa_operador   NUMERIC(5,2) DEFAULT 10;
+ALTER TABLE produtos ADD COLUMN IF NOT EXISTS img_produtos    TEXT;
+
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS fornecedor_id    INTEGER REFERENCES fornecedores(id) ON DELETE SET NULL;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_fornecedor  NUMERIC(5,2) DEFAULT 90;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_operador    NUMERIC(5,2) DEFAULT 10;
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS status_pagamento VARCHAR(20) DEFAULT 'Pendente';
+
+CREATE INDEX IF NOT EXISTS idx_pedidos_fornecedor ON pedidos(fornecedor_id);
+CREATE INDEX IF NOT EXISTS idx_produtos_fornecedor ON produtos(fornecedor_id);
