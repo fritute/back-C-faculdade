@@ -392,7 +392,7 @@ static DbResult pg_delete_cliente(dp_db_t db, int id) {
 
 static DbResult pg_get_fornecedores(dp_db_t db) {
     PG_CONN
-    PGresult *r = PQexec(conn,"SELECT id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em FROM fornecedores ORDER BY id");
+    PGresult *r = PQexec(conn,"SELECT id,nome,'' AS cnpj,'' AS contato,email,'' AS tel,'' AS categoria,0 AS prazo,'Ativo' AS status,criado_em,atualizado_em FROM usuarios WHERE role='admin' ORDER BY id");
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_list(r);
 }
@@ -402,8 +402,8 @@ static DbResult pg_get_fornecedor_by_id(dp_db_t db, int id) {
     char sid[16]; snprintf(sid,sizeof(sid),"%d",id);
     const char *p[]={sid};
     PGresult *r = pg_exec_lit(conn,
-        "SELECT id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em"
-        " FROM fornecedores WHERE id=?::int", p, 1);
+        "SELECT id,nome,'' AS cnpj,'' AS contato,email,'' AS tel,'' AS categoria,0 AS prazo,'Ativo' AS status,criado_em,atualizado_em"
+        " FROM usuarios WHERE id=?::int AND role='admin'", p, 1);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
@@ -942,9 +942,8 @@ static DbResult pg_get_usuario_by_email(dp_db_t db, const char *email) {
     const char *p[]={email};
     PGresult *r = PQexecParams(conn,
         "SELECT u.id,u.nome,u.email,u.senha_hash,u.role,u.criado_em,"
-        "f.id AS fornecedor_id "
+        "(CASE WHEN u.role='admin' THEN u.id ELSE NULL END) AS fornecedor_id "
         "FROM usuarios u "
-        "LEFT JOIN fornecedores f ON f.usuario_id=u.id "
         "WHERE u.email=$1",
         1,NULL,p,NULL,NULL,0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
@@ -957,9 +956,8 @@ static DbResult pg_get_usuario_by_id(dp_db_t db, int id) {
     const char *p[]={sid};
     PGresult *r = PQexecParams(conn,
         "SELECT u.id,u.nome,u.email,u.role,u.criado_em,"
-        "f.id AS fornecedor_id "
+        "(CASE WHEN u.role='admin' THEN u.id ELSE NULL END) AS fornecedor_id "
         "FROM usuarios u "
-        "LEFT JOIN fornecedores f ON f.usuario_id=u.id "
         "WHERE u.id=$1",
         1,NULL,p,NULL,NULL,0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
@@ -996,20 +994,8 @@ static DbResult pg_save_usuario(dp_db_t db, const char *body) {
     snprintf(email_s, sizeof(email_s), "%s", PQgetvalue(ru, 0, 2));
     snprintf(role_s,  sizeof(role_s),  "%s", PQgetvalue(ru, 0, 3));
 
-    int fornecedor_id = -1;
+    int fornecedor_id = (strcmp(role_s, "admin") == 0) ? user_id : -1;
 
-    /* Auto-cria registro de fornecedor se role='admin' */
-    if (strcmp(role_s, "admin") == 0) {
-        const char *pf[] = {uid_s, nome_s, email_s};
-        PGresult *rf = PQexecParams(conn,
-            "INSERT INTO fornecedores(usuario_id, nome, email, status)"
-            " VALUES($1::int, $2, $3, 'Ativo')"
-            " ON CONFLICT DO NOTHING RETURNING id",
-            3, NULL, pf, NULL, NULL, 0);
-        if (PQresultStatus(rf) == PGRES_TUPLES_OK && PQntuples(rf) > 0)
-            fornecedor_id = atoi(PQgetvalue(rf, 0, 0));
-        PQclear(rf);
-    }
 
     /* Auto-cria registro de cliente se role='cliente' */
     if (strcmp(role_s, "cliente") == 0) {
@@ -1084,8 +1070,8 @@ static DbResult pg_get_fornecedor_by_usuario_id(dp_db_t db, int usuario_id) {
     char uid_s[16]; snprintf(uid_s,sizeof(uid_s),"%d",usuario_id);
     const char *p[]={uid_s};
     PGresult *r = PQexecParams(conn,
-        "SELECT id,nome,cnpj,contato,email,tel,categoria,prazo,status,criado_em,atualizado_em"
-        " FROM fornecedores WHERE usuario_id=$1",1,NULL,p,NULL,NULL,0);
+        "SELECT id,nome,'' AS cnpj,'' AS contato,email,'' AS tel,'' AS categoria,0 AS prazo,'Ativo' AS status,criado_em,atualizado_em"
+        " FROM usuarios WHERE id=$1 AND role='admin'",1,NULL,p,NULL,NULL,0);
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
 }
