@@ -122,9 +122,8 @@ VALUES ('Admin Master', 'admin@distribpro.com.br', '$2b$12$K3y6C.E0S.uD8M.O5u.7.
 -- Migrations v2: Marketplace
 ALTER TABLE produtos ADD COLUMN taxa_fornecedor REAL DEFAULT 90;
 ALTER TABLE produtos ADD COLUMN taxa_operador   REAL DEFAULT 10;
-ALTER TABLE produtos ADD COLUMN img_produtos    TEXT;
-
-ALTER TABLE pedidos ADD COLUMN fornecedor_id    INTEGER REFERENCES fornecedores(id);
+ALTER TABLE produtos ADD COLUMN img_produtos TEXT;
+ALTER TABLE produtos ADD COLUMN fornecedor_id INTEGER REFERENCES usuarios(id);
 ALTER TABLE pedidos ADD COLUMN taxa_fornecedor  REAL DEFAULT 90;
 ALTER TABLE pedidos ADD COLUMN taxa_operador    REAL DEFAULT 10;
 ALTER TABLE pedidos ADD COLUMN status_pagamento TEXT DEFAULT 'Pendente';
