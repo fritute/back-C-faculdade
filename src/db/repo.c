@@ -1,4 +1,4 @@
-﻿#include "distribpro/db.h"
+#include "distribpro/db.h"
 #include "distribpro/repo.h"
 #include "cJSON.h"
 #include <string.h>
@@ -880,8 +880,8 @@ static DbResult pg_get_dashboard_kpis(dp_db_t db) {
         "(SELECT COUNT(*) FROM pedidos WHERE status='Pendente') AS pedidos_pendentes,"
         "(SELECT COUNT(*) FROM pedidos WHERE status='Em Rota') AS pedidos_em_rota,"
         "(SELECT COALESCE(SUM(valor),0) FROM pedidos WHERE status='Entregue') AS faturamento_total,"
-        "(SELECT COALESCE(SUM(valor),0) FROM pedidos WHERE status='Entregue'"
-        " AND DATE_TRUNC('month',criado_em)=DATE_TRUNC('month',NOW())) AS faturamento_mes,"
+        "(SELECT COALESCE(SUM(valor * COALESCE(taxa_operador, 10) / 100),0) FROM pedidos WHERE status='Entregue') AS comissao_plataforma,"
+        "(SELECT COALESCE(SUM(valor * (100 - COALESCE(taxa_operador, 10)) / 100),0) FROM pedidos WHERE status='Entregue') AS lucro_liquido,"
         "(SELECT COUNT(*) FROM produtos WHERE estoque<=estoque_min) AS estoque_baixo");
     if (PQresultStatus(r) != PGRES_TUPLES_OK) return db_err(conn, r);
     return ok_item(r);
@@ -1346,6 +1346,7 @@ static DbResult pg_relatorio_financeiro(dp_db_t db, const char *inicio, const ch
         "SELECT COALESCE(SUM(valor),0) AS faturamento_total,"
         "COALESCE(SUM(CASE WHEN status='Entregue' THEN valor ELSE 0 END),0) AS faturamento_realizado,"
         "COALESCE(SUM(CASE WHEN status NOT IN ('Cancelado','Entregue') THEN valor ELSE 0 END),0) AS faturamento_pendente,"
+        "COALESCE(SUM(valor)/NULLIF(COUNT(*),0),0) AS ticket_medio,"
         "COUNT(*) AS total_pedidos,"
         "COUNT(CASE WHEN status='Cancelado' THEN 1 END) AS pedidos_cancelados "
         "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date%s", fid_filter);
@@ -1356,18 +1357,18 @@ static DbResult pg_relatorio_financeiro(dp_db_t db, const char *inicio, const ch
     cJSON *summary = cJSON_DetachItemFromArray(stats, 0);
     cJSON_Delete(stats); PQclear(r1);
 
-    /* Detalhamento mensal */
+    /* Detalhamento diário */
     char sql2[512];
     snprintf(sql2, sizeof(sql2),
-        "SELECT TO_CHAR(DATE_TRUNC('month',criado_em),'YYYY-MM') AS mes,"
-        "COUNT(*) AS total_pedidos, COALESCE(SUM(valor),0) AS valor_total "
+        "SELECT TO_CHAR(criado_em, 'YYYY-MM-DD') AS dia,"
+        "COUNT(*) AS total_pedidos, COALESCE(SUM(valor),0) AS valor "
         "FROM pedidos WHERE criado_em::date BETWEEN $1::date AND $2::date%s "
-        "GROUP BY mes ORDER BY mes ASC", fid_filter);
+        "GROUP BY dia ORDER BY dia ASC", fid_filter);
     PGresult *r2 = PQexecParams(conn, sql2, nparams, NULL, p, NULL, NULL, 0);
-    cJSON *mensal = (PQresultStatus(r2)==PGRES_TUPLES_OK) ? pg_to_array(r2) : cJSON_CreateArray();
+    cJSON *diario = (PQresultStatus(r2)==PGRES_TUPLES_OK) ? pg_to_array(r2) : cJSON_CreateArray();
     PQclear(r2);
 
-    cJSON_AddItemToObject(summary, "mensal", mensal);
+    cJSON_AddItemToObject(summary, "faturamento_por_dia", diario);
     cJSON *periodo = cJSON_CreateObject();
     cJSON_AddStringToObject(periodo, "inicio", inicio);
     cJSON_AddStringToObject(periodo, "fim", fim);
