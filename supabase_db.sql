@@ -124,5 +124,7 @@ ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_fornecedor  NUMERIC(5,2) DEFAU
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS taxa_operador    NUMERIC(5,2) DEFAULT 10;
 ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS status_pagamento VARCHAR(20) DEFAULT 'Pendente';
 
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_pedidos_fornecedor ON pedidos(fornecedor_id);
 CREATE INDEX IF NOT EXISTS idx_produtos_fornecedor ON produtos(fornecedor_id);

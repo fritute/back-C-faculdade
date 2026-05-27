@@ -128,3 +128,5 @@ ALTER TABLE pedidos ADD COLUMN fornecedor_id    INTEGER REFERENCES fornecedores(
 ALTER TABLE pedidos ADD COLUMN taxa_fornecedor  REAL DEFAULT 90;
 ALTER TABLE pedidos ADD COLUMN taxa_operador    REAL DEFAULT 10;
 ALTER TABLE pedidos ADD COLUMN status_pagamento TEXT DEFAULT 'Pendente';
+
+ALTER TABLE clientes ADD COLUMN user_id INTEGER REFERENCES usuarios(id);
